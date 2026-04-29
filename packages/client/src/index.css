@@ -1,0 +1,71 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Things Tailwind doesn't handle inline well */
+html, body, #root { height: 100%; margin: 0; }
+body { background: #0a0b0e; color: #e6e8eb; overflow: hidden; }
+
+.tnum { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
+
+/* Live indicator pulse */
+@keyframes pulse-soft {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+.animate-pulse-soft { animation: pulse-soft 2.5s infinite; }
+
+/* Cell flash on tick */
+@keyframes flashUp {
+  0% { background-color: hsla(140, 70%, 50%, 0.35); color: #4ade80; }
+  100% { background-color: transparent; }
+}
+@keyframes flashDn {
+  0% { background-color: hsla(0, 70%, 50%, 0.35); color: #f87171; }
+  100% { background-color: transparent; }
+}
+.flash-up { animation: flashUp 0.7s ease-out; }
+.flash-dn { animation: flashDn 0.7s ease-out; }
+
+/* Range slider thumb */
+input[type="range"].thr-range {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #242932;
+  height: 4px;
+  border-radius: 999px;
+  outline: none;
+}
+input[type="range"].thr-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #6ea8ff;
+  border-radius: 50%;
+  cursor: pointer;
+}
+input[type="range"].thr-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #6ea8ff;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+/* ITM gradients */
+.itm-call { background: linear-gradient(90deg, hsla(150, 40%, 25%, 0.12), transparent); }
+.itm-put  { background: linear-gradient(-90deg, hsla(0, 40%, 25%, 0.10), transparent); }
+
+/* ATM band ring */
+.r-atm { box-shadow: inset 0 0 0 1px hsla(45, 80%, 55%, 0.18); }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #0a0b0e; }
+::-webkit-scrollbar-thumb { background: #1b1f26; border: 2px solid #0a0b0e; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #242932; }
+
+/* Switch knob transition */
+.sw-knob { transition: left 0.15s ease; }
