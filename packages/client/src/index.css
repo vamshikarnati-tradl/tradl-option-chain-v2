@@ -69,3 +69,93 @@ input[type="range"].thr-range::-moz-range-thumb {
 
 /* Switch knob transition */
 .sw-knob { transition: left 0.15s ease; }
+
+/* ─────────────── GLASS THEME ─────────────── */
+/* Activated by toggling `theme-glass` on <body>. All overrides key off
+   existing Tailwind tokens — no component changes needed. */
+
+body { transition: background 0.4s ease; }
+
+body.theme-glass {
+  background:
+    radial-gradient(ellipse 80% 60% at 15% 20%, hsla(280, 80%, 50%, 0.35), transparent 60%),
+    radial-gradient(ellipse 70% 50% at 85% 30%, hsla(200, 90%, 55%, 0.30), transparent 60%),
+    radial-gradient(ellipse 90% 70% at 50% 90%, hsla(330, 80%, 55%, 0.28), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 90% 80%, hsla(160, 80%, 50%, 0.22), transparent 60%),
+    linear-gradient(135deg, #0a0612 0%, #0d0a1a 50%, #0a0a18 100%);
+  background-attachment: fixed;
+}
+
+/* Subtle dot texture over the gradient */
+body.theme-glass::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
+  background-size: 24px 24px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Surface tokens become translucent + blurred */
+body.theme-glass .bg-bg-0 { background-color: transparent !important; }
+body.theme-glass .bg-bg-1 {
+  background-color: rgba(15, 18, 28, 0.55) !important;
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+}
+body.theme-glass .bg-bg-2 {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+  backdrop-filter: blur(8px);
+}
+body.theme-glass .bg-bg-3 { background-color: rgba(255, 255, 255, 0.07) !important; }
+body.theme-glass .bg-bg-4 { background-color: rgba(255, 255, 255, 0.10) !important; }
+
+body.theme-glass .border-line   { border-color: rgba(255, 255, 255, 0.08) !important; }
+body.theme-glass .border-line-2 { border-color: rgba(255, 255, 255, 0.14) !important; }
+body.theme-glass .hover\:border-line-2:hover { border-color: rgba(255, 255, 255, 0.20) !important; }
+body.theme-glass .hover\:bg-bg-2:hover { background-color: rgba(255, 255, 255, 0.06) !important; }
+body.theme-glass .hover\:bg-bg-3:hover { background-color: rgba(255, 255, 255, 0.10) !important; }
+
+/* Side panels (RulesPanel / ColumnsPanel) — frosted aside */
+body.theme-glass aside.bg-bg-1 {
+  background-color: rgba(18, 20, 32, 0.65) !important;
+  box-shadow: -16px 0 40px rgba(0,0,0,0.5), inset 1px 0 0 rgba(255,255,255,0.06) !important;
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+}
+
+/* Header */
+body.theme-glass header.bg-bg-1 {
+  background-color: rgba(15, 18, 28, 0.50) !important;
+}
+
+/* Table floats as a glass card inside <main> */
+body.theme-glass main { padding: 14px; }
+body.theme-glass main > div:not(.flash-up):not(.flash-dn) {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(15, 17, 25, 0.50);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: 0 24px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+
+/* Table internals: ITM gradients off (read against glass), header semi-transparent */
+body.theme-glass .itm-call,
+body.theme-glass .itm-put { background: transparent !important; }
+body.theme-glass thead tr { background: rgba(15, 17, 25, 0.55) !important; }
+body.theme-glass thead th {
+  background: transparent !important;
+  border-bottom-color: rgba(255, 255, 255, 0.10) !important;
+}
+body.theme-glass tbody td   { border-bottom-color: rgba(255, 255, 255, 0.05) !important; }
+body.theme-glass tbody tr:hover    { background: rgba(255, 255, 255, 0.04) !important; }
+body.theme-glass tbody tr:hover td { background: transparent !important; }
+body.theme-glass .r-atm {
+  box-shadow: inset 0 0 0 1px hsla(45, 90%, 65%, 0.30) !important;
+}
+
+/* Scrollbar — invisible track in glass mode */
+body.theme-glass ::-webkit-scrollbar-track { background: transparent; }
+body.theme-glass ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-color: transparent; }

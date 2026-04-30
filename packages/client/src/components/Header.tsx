@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { Dropdown } from './Dropdown';
 import { fmtChange, fmtCompact, fmtNum, timeAgo } from '../utils/format';
+import { useTheme } from '../hooks/useTheme';
 
 const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
 
@@ -57,6 +58,7 @@ export function Header({
   ruleCount, columnCount, lastUpdate, connected, totalVolume, totalOI,
   panelOpen,
 }: Props) {
+  const [theme, setTheme] = useTheme();
   return (
     <header className={`flex items-center justify-between h-12 pl-3.5 ${panelOpen ? 'pr-[394px]' : 'pr-3.5'} gap-4 bg-bg-1 border-b border-line flex-shrink-0 transition-[padding] duration-300`}>
       <div className="flex items-center gap-3">
@@ -121,6 +123,22 @@ export function Header({
           }`}>
             {columnCount}
           </span>
+        </button>
+        <button
+          title={theme === 'glass' ? 'Switch to Terminal theme' : 'Switch to Glass theme'}
+          onClick={() => setTheme(theme === 'glass' ? 'terminal' : 'glass')}
+          className="w-7 h-7 rounded-md flex items-center justify-center text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
+        >
+          {theme === 'glass' ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <path d="M12 3l8 5-8 5-8-5 8-5z" />
+              <path d="M4 13l8 5 8-5" opacity="0.6" />
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+              <path d="M5 7l4 5-4 5M12 17h7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          )}
         </button>
         <button
           title="Settings"
