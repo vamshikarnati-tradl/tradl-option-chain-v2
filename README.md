@@ -107,6 +107,39 @@ Key files:
 - `workers/compute.worker.ts` — Web Worker entry point; receives `UPDATE_DATA` / `SET_RULES` / `SET_COLUMNS`, posts back `COMPUTE_RESULTS` with timing + cache hits.
 - `core/result-index.ts` — inverts rule/column result lists into per-strike maps for O(1) read in the table.
 
+## Deploying to Railway
+
+The repo is configured for a **single Railway service** that serves both the API and the built client (no CORS, one URL, WebSocket on the same origin). [`railway.json`](./railway.json) at the root tells Railway how to build and deploy.
+
+### One-time setup
+
+1. Push the repo to GitHub (already done if you're reading this on GitHub).
+2. On [railway.com](https://railway.com): **New Project → Deploy from GitHub repo →** pick `vyapak1209/tradl-option-chain`.
+3. In the service's **Variables** tab, set:
+   - `ANTHROPIC_API_KEY` — required for the AI command palette (without it, only the palette returns a 503; everything else works)
+   - `DATA_SOURCE` — optional, `mock` (default) or `nse`
+   - `POLL_INTERVAL_MS` — optional override
+4. In the service's **Settings → Networking**, click **Generate Domain**.
+
+That's it. Railway will detect the `railway.json`, run `npm install && npm run build`, then `npm start`. The healthcheck hits `/api/health` so Railway knows when the service is ready.
+
+### Or via the CLI
+
+```bash
+brew install railway
+railway login
+railway link               # connect to the project
+railway up                 # deploy current branch
+railway variables --set ANTHROPIC_API_KEY=sk-ant-...
+```
+
+### What the production server does differently
+
+- `node packages/server/dist/index.js` instead of `tsx watch` — compiled, no watcher
+- Serves [packages/client/dist](packages/client/dist) as static files, with an SPA fallback for non-`/api`, non-`/ws` paths
+- Reads env vars directly from the Railway environment (no `--env-file`)
+- WS connections come in on `wss://your-domain.up.railway.app/ws/option-chain/NIFTY`; the client picks the right protocol from `window.location`
+
 ## What's next (Phase 3 of the PRD)
 
 - Benchmark with 50+ active rules and 10+ custom columns to validate the < 5ms / < 50ms targets

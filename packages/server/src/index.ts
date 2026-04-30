@@ -3,6 +3,9 @@ import cors from 'cors';
 import http from 'http';
 import type { IncomingMessage } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
+import { existsSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { fetchOptionChain, fetchExpiries } from './nse-fetcher.js';
 import { buildSnapshot } from './data-transformer.js';
 import { buildMockSnapshot, getMockExpiries } from './mock-source.js';
@@ -172,6 +175,19 @@ app.get('/api/option-chain/:symbol', async (req, res) => {
     res.status(502).json({ error: err instanceof Error ? err.message : String(err) });
   }
 });
+
+// In production, serve the built client from packages/client/dist (Railway and
+// other single-service deploys). Skipped in dev — Vite owns those files.
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const clientDist = join(__dirname, '..', '..', 'client', 'dist');
+if (existsSync(clientDist)) {
+  app.use(express.static(clientDist, { maxAge: '1h', index: false }));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api') || req.path.startsWith('/ws')) return next();
+    res.sendFile(join(clientDist, 'index.html'));
+  });
+  console.log(`[server] serving client from ${clientDist}`);
+}
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ noServer: true });
