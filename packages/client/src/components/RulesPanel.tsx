@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
+import { Modal } from './Modal';
 import { fmtCompact } from '../utils/format';
 import { PALETTE_HUES, nextUnusedHue, ruleFg, ruleHsl } from '../core/palette';
 import type { Condition, NumericField, Operator, RuleDefinition, RuleSlider } from '../core/types';
@@ -242,10 +243,11 @@ function RuleBuilder({ existing, onCreate, onCancel }: BuilderProps) {
 
   const inp = 'bg-bg-1 border border-line-2 text-ink text-xs font-mono px-2.5 py-1.5 rounded outline-none focus:border-accent flex-1 min-w-0';
   const inpNarrow = 'bg-bg-1 border border-line-2 text-ink text-xs font-mono px-2.5 py-1.5 rounded outline-none focus:border-accent flex-none w-[70px]';
+  const inpValue  = 'bg-bg-1 border border-line-2 text-ink text-xs font-mono px-2.5 py-1.5 rounded outline-none focus:border-accent flex-none w-[110px]';
   const lbl = 'text-[11px] text-ink-3 w-[60px] flex-none font-mono uppercase tracking-[0.06em]';
 
   return (
-    <div className="bg-bg-2 border border-line-2 rounded-lg p-3">
+    <div>
       <div className="flex items-center gap-2 mb-2.5">
         <label className={lbl}>Name</label>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Big Call OI" className={inp} />
@@ -259,7 +261,7 @@ function RuleBuilder({ existing, onCreate, onCancel }: BuilderProps) {
         <select className={inpNarrow} value={op} onChange={(e) => setOp(e.target.value as Operator)}>
           {OP_OPTIONS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
         </select>
-        <input type="number" className={inpNarrow} value={value} onChange={(e) => setValue(parseFloat(e.target.value) || 0)} />
+        <input type="number" className={inpValue} value={value} onChange={(e) => setValue(parseFloat(e.target.value) || 0)} />
       </div>
 
       <div className="flex items-center gap-2 mb-2.5">
@@ -375,17 +377,22 @@ export function RulesPanel({
       </div>
 
       <div className="p-3 border-t border-line shrink-0">
-        {!building ? (
-          <button
-            onClick={() => setBuilding(true)}
-            className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
-          >
-            <Icon name="plus" size={14} /> New rule
-          </button>
-        ) : (
-          <RuleBuilder existing={rules} onCancel={() => setBuilding(false)} onCreate={addRule} />
-        )}
+        <button
+          onClick={() => setBuilding(true)}
+          className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
+        >
+          <Icon name="plus" size={14} /> New rule
+        </button>
       </div>
+
+      <Modal
+        open={building}
+        onClose={() => setBuilding(false)}
+        title="New rule"
+        subtitle="condition · scope · color"
+      >
+        <RuleBuilder existing={rules} onCancel={() => setBuilding(false)} onCreate={addRule} />
+      </Modal>
     </aside>
   );
 }

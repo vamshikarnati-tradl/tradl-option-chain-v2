@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { Dropdown } from './Dropdown';
 import { fmtChange, fmtCompact, fmtNum, timeAgo } from '../utils/format';
-import { useTheme } from '../hooks/useTheme';
+import { NEXT_THEME, THEME_LABELS, useTheme, type Theme } from '../hooks/useTheme';
 
 const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
 
@@ -49,6 +49,9 @@ interface Props {
   totalVolume: number;
   totalOI: number;
   panelOpen: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onAsk: () => void;
 }
 
 export function Header({
@@ -56,16 +59,18 @@ export function Header({
   spot, spotChange, spotPct,
   rulesOpen, columnsOpen, onToggleRules, onToggleColumns,
   ruleCount, columnCount, lastUpdate, connected, totalVolume, totalOI,
-  panelOpen,
+  panelOpen, expanded, onToggleExpanded, onAsk,
 }: Props) {
   const [theme, setTheme] = useTheme();
+  const next: Theme = NEXT_THEME[theme];
   return (
     <header className={`flex items-center justify-between h-12 pl-3.5 ${panelOpen ? 'pr-[394px]' : 'pr-3.5'} gap-4 bg-bg-1 border-b border-line flex-shrink-0 transition-[padding] duration-300`}>
       <div className="flex items-center gap-3">
         <div className="flex items-baseline gap-1.5 mr-1">
           <span className="text-accent text-base leading-none">▰</span>
           <span className="font-mono text-[12.5px] tracking-[-0.01em] font-semibold">
-            tradr<span className="text-ink-3 font-normal">/option-chain</span>
+            <span className="font-mono">tradl</span>
+            <span className="text-ink-3 font-normal">/option-chain</span>
           </span>
         </div>
         <Dropdown value={symbol} options={SYMBOLS} onChange={setSymbol} width={120} />
@@ -92,6 +97,15 @@ export function Header({
 
       <div className="flex items-center gap-3">
         <ConnectionDot connected={connected} lastUpdate={lastUpdate} />
+        <button
+          onClick={onAsk}
+          title="Ask AI to add a rule or column"
+          className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line-2 bg-transparent text-ink-2 text-xs font-medium hover:bg-bg-2 hover:text-ink transition-all"
+        >
+          <span className="text-accent leading-none">✦</span>
+          <span>Ask</span>
+          <kbd className="font-mono text-[10px] bg-bg-3 text-ink-2 px-1 py-0.5 rounded border border-line-2">/</kbd>
+        </button>
         <button
           onClick={onToggleRules}
           className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs font-medium transition-all ${
@@ -125,20 +139,31 @@ export function Header({
           </span>
         </button>
         <button
-          title={theme === 'glass' ? 'Switch to Terminal theme' : 'Switch to Glass theme'}
-          onClick={() => setTheme(theme === 'glass' ? 'terminal' : 'glass')}
-          className="w-7 h-7 rounded-md flex items-center justify-center text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
+          title={`Theme: ${THEME_LABELS[theme]} — click for ${THEME_LABELS[next]}`}
+          onClick={() => setTheme(next)}
+          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
         >
-          {theme === 'glass' ? (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M12 3l8 5-8 5-8-5 8-5z" />
-              <path d="M4 13l8 5 8-5" opacity="0.6" />
-            </svg>
-          ) : (
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <path d="M5 7l4 5-4 5M12 17h7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          )}
+          <ThemeIcon theme={theme} />
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em]">{THEME_LABELS[theme]}</span>
+        </button>
+
+        <button
+          title={expanded ? 'Hide Vol & IV columns' : 'Show Vol & IV columns'}
+          onClick={onToggleExpanded}
+          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] font-medium transition-colors border ${
+            expanded
+              ? 'bg-bg-3 text-ink border-line-2'
+              : 'bg-transparent text-ink-3 border-transparent hover:bg-bg-2 hover:text-ink'
+          }`}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+            {expanded ? (
+              <path d="M9 6l-6 6 6 6M15 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+            ) : (
+              <path d="M15 6l-6 6 6 6M9 18l-6-6 6-6" strokeLinecap="round" strokeLinejoin="round" opacity="0.6" />
+            )}
+          </svg>
+          <span className="font-mono text-[10px] uppercase tracking-[0.06em]">{expanded ? 'Wide' : 'Slim'}</span>
         </button>
         <button
           title="Settings"
@@ -155,4 +180,40 @@ export function Header({
       </div>
     </header>
   );
+}
+
+function ThemeIcon({ theme }: { theme: Theme }) {
+  switch (theme) {
+    case 'paper':
+      // Page corner — warm light surface
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z" />
+          <path d="M14 3v6h6" opacity="0.6" />
+        </svg>
+      );
+    case 'frost':
+      // Snowflake — pure white surface
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M12 2v20M4 6l16 12M4 18L20 6" strokeLinecap="round" />
+        </svg>
+      );
+    case 'terminal':
+      // Chevron prompt
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <path d="M5 7l4 5-4 5M12 17h7" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      );
+    case 'clean':
+    default:
+      // Half-circle — neutral
+      return (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 3v18" opacity="0.5" />
+        </svg>
+      );
+  }
 }

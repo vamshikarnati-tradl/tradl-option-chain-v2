@@ -16,6 +16,14 @@ interface Props {
   rules: RuleDefinition[];
   columns: CustomColumnDefinition[];
   rows: OptionChainRow[];
+  /** Live cursor position. Used when `anchor === 'cursor'`. */
+  mouse: { x: number; y: number } | null;
+  /**
+   * 'cursor' = follow the live cursor until the user types or hovers in
+   * (current `/` shortcut behaviour). `{x,y}` = open pinned at that
+   * coordinate (Ask button + Cmd+K — feels like a centered modal).
+   */
+  anchor: 'cursor' | { x: number; y: number };
   onApplyRule: (rule: RuleDefinition) => void;
   onApplyColumn: (col: CustomColumnDefinition) => void;
 }
@@ -31,7 +39,7 @@ const SUGGESTIONS = [
 ];
 
 export function CommandPalette({
-  open, onClose, rules, columns, rows, onApplyRule, onApplyColumn,
+  open, onClose, rules, columns, rows, mouse, anchor, onApplyRule, onApplyColumn,
 }: Props) {
   const [input, setInput] = useState('');
   const [status, setStatus] = useState<Status>('idle');
@@ -39,8 +47,14 @@ export function CommandPalette({
   const [error, setError] = useState<string | null>(null);
   const [editingJson, setEditingJson] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentEntry[]>(() => loadRecent());
+  // When false, palette follows the cursor (with a brief ease). Once true,
+  // it locks at `frozenPos` so it doesn't drift while the user is typing or
+  // clicking buttons inside it.
+  const [frozen, setFrozen] = useState(false);
+  const [frozenPos, setFrozenPos] = useState<{ x: number; y: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   // Reset every open
   useEffect(() => {
@@ -51,11 +65,42 @@ export function CommandPalette({
       setError(null);
       setEditingJson(null);
       setRecent(loadRecent());
+      // Fixed-anchor opens (Ask button, Cmd+K) start frozen at the supplied
+      // coords. Cursor opens (`/`) start free and follow the mouse.
+      if (anchor === 'cursor') {
+        setFrozen(false);
+        setFrozenPos(null);
+      } else {
+        setFrozen(true);
+        setFrozenPos({ x: anchor.x, y: anchor.y });
+      }
       requestAnimationFrame(() => inputRef.current?.focus());
     } else {
       abortRef.current?.abort();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Lock position the moment the user starts typing — keyboard input
+  // shouldn't make the panel slide around.
+  useEffect(() => {
+    if (open && input.length > 0 && !frozen && rootRef.current) {
+      const r = rootRef.current.getBoundingClientRect();
+      setFrozenPos({ x: r.left, y: r.top });
+      setFrozen(true);
+    }
+  }, [open, input, frozen]);
+
+  // Click-outside-to-close. Mounted on next tick so the keypress that
+  // opened the palette doesn't immediately close it via mousedown bubbling.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
+    };
+    const t = window.setTimeout(() => window.addEventListener('mousedown', onDown), 0);
+    return () => { window.clearTimeout(t); window.removeEventListener('mousedown', onDown); };
+  }, [open, onClose]);
 
   // Esc to close (global, even if a child stole focus)
   useEffect(() => {
@@ -156,15 +201,46 @@ export function CommandPalette({
 
   if (!open) return null;
 
+  // Position: follow the cursor with a 16/12 px offset, clamp to viewport.
+  // Once frozen (typing or pointer entered), pin to the captured position.
+  const PAL_W = 460;
+  const PAL_H_EST = 360;
+  const margin = 12;
+
+  let left: number;
+  let top: number;
+  if (frozen && frozenPos) {
+    left = frozenPos.x;
+    top = frozenPos.y;
+  } else {
+    const ax = mouse?.x ?? window.innerWidth / 2;
+    const ay = mouse?.y ?? window.innerHeight / 3;
+    left = ax + 16;
+    if (left + PAL_W + margin > window.innerWidth) left = Math.max(margin, ax - 16 - PAL_W);
+    top = ay + 12;
+    if (top + PAL_H_EST + margin > window.innerHeight) top = Math.max(margin, window.innerHeight - PAL_H_EST - margin);
+  }
+
   return (
     <div
-      className="fixed inset-0 z-[2000] flex items-start justify-center pt-[14vh] bg-black/50 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      ref={rootRef}
+      style={{
+        left,
+        top,
+        width: PAL_W,
+        maxHeight: '72vh',
+        transition: frozen ? 'none' : 'left 80ms ease-out, top 80ms ease-out',
+      }}
+      className="fixed z-[2000] bg-bg-1 border border-line-2 rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col"
+      onMouseEnter={() => {
+        if (!frozen && rootRef.current) {
+          const r = rootRef.current.getBoundingClientRect();
+          setFrozenPos({ x: r.left, y: r.top });
+          setFrozen(true);
+        }
+      }}
+      onMouseDown={(e) => e.stopPropagation()}
     >
-      <div
-        className="bg-bg-1 border border-line-2 rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col"
-        style={{ width: 'min(640px, 92vw)', maxHeight: '72vh' }}
-      >
         {/* Input row */}
         <div className="flex items-center gap-2.5 px-4 h-[52px] border-b border-line shrink-0">
           <span className="text-accent text-base leading-none">✦</span>
@@ -174,7 +250,7 @@ export function CommandPalette({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onInputKeyDown}
             placeholder="describe a rule or column…"
-            className="flex-1 bg-transparent border-0 outline-0 text-ink text-[14px] placeholder:text-ink-3"
+            className="flex-1 bg-transparent border-0 outline-none focus:outline-none focus:ring-0 text-ink text-[14px] placeholder:text-ink-3"
           />
           {status === 'parsing' && <ParsingDots />}
           <kbd className="font-mono text-[10px] bg-bg-3 text-ink-2 px-1.5 py-0.5 rounded border border-line-2">esc</kbd>
@@ -236,7 +312,6 @@ export function CommandPalette({
             <span>haiku · structured</span>
           </div>
         </div>
-      </div>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Icon } from './Icon';
+import { Modal } from './Modal';
 import { fmtNum } from '../utils/format';
 import { extractDependencies, parseExpression } from '../core/expression-parser';
 import { evaluate } from '../core/expression-evaluator';
@@ -177,7 +178,7 @@ function ColumnBuilder({ sampleRow, onCreate, onCancel }: BuilderProps) {
   const lbl = 'text-[11px] text-ink-3 font-mono uppercase tracking-[0.06em]';
 
   return (
-    <div className="bg-bg-2 border border-line-2 rounded-lg p-3">
+    <div>
       <div className="flex items-center gap-2 mb-2.5">
         <label className={`${lbl} w-[60px] flex-none`}>Name</label>
         <input className={inp} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. PCR" />
@@ -303,17 +304,23 @@ export function ColumnsPanel({ open, onClose, columns, columnErrors, sampleRow, 
       </div>
 
       <div className="p-3 border-t border-line shrink-0">
-        {!building ? (
-          <button
-            onClick={() => setBuilding(true)}
-            className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
-          >
-            <Icon name="plus" size={14} /> New column
-          </button>
-        ) : (
-          <ColumnBuilder sampleRow={sampleRow} onCancel={() => setBuilding(false)} onCreate={add} />
-        )}
+        <button
+          onClick={() => setBuilding(true)}
+          className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
+        >
+          <Icon name="plus" size={14} /> New column
+        </button>
       </div>
+
+      <Modal
+        open={building}
+        onClose={() => setBuilding(false)}
+        title="New column"
+        subtitle="expression · format"
+        width={600}
+      >
+        <ColumnBuilder sampleRow={sampleRow} onCancel={() => setBuilding(false)} onCreate={add} />
+      </Modal>
     </aside>
   );
 }

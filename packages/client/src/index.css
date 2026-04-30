@@ -4,7 +4,12 @@
 
 /* Things Tailwind doesn't handle inline well */
 html, body, #root { height: 100%; margin: 0; }
-body { background: #0a0b0e; color: #e6e8eb; overflow: hidden; }
+body {
+  background: #0a0b0e;
+  color: #e6e8eb;
+  overflow: hidden;
+  transition: background 0.4s, color 0.4s;
+}
 
 .tnum { font-feature-settings: "tnum"; font-variant-numeric: tabular-nums; }
 
@@ -54,12 +59,72 @@ input[type="range"].thr-range::-moz-range-thumb {
   cursor: pointer;
 }
 
-/* ITM gradients */
-.itm-call { background: linear-gradient(90deg, hsla(150, 40%, 25%, 0.12), transparent); }
-.itm-put  { background: linear-gradient(-90deg, hsla(0, 40%, 25%, 0.10), transparent); }
+/* ─────────────── CLEAN THEME (default) ─────────────── */
+/* Quiet baseline: no per-row dividers, no ITM gradients, no vertical lines,
+   sentence-case headers. Just data. */
 
-/* ATM band ring */
-.r-atm { box-shadow: inset 0 0 0 1px hsla(45, 80%, 55%, 0.18); }
+/* ITM cells transparent in clean — moneyness is shown via the strike marker */
+.itm-call,
+.itm-put { background: transparent; }
+
+/* Soft column headers */
+.chain-table th.th-clean {
+  border: 0;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  background: transparent;
+  border-bottom: 1px solid #1f242c;
+}
+
+/* No per-row dividers in clean */
+.chain-table tbody tr,
+.chain-table tbody td { border: 0; }
+
+/* Subtle group separator every 5 rows */
+.chain-table tbody tr:nth-child(5n) td {
+  border-bottom: 1px solid rgba(31, 36, 44, 0.45);
+}
+
+/* ATM band — soft tint, no ring (clean) */
+.chain-table tr.r-atm { background: rgba(110, 168, 255, 0.04); }
+
+/* Spot divider — visible without being shouty */
+.chain-table tr.spot-row td > div { border-color: #2a3038 !important; }
+
+/* Custom column gets a faint left rule to mark the section */
+.chain-table .custom-col {
+  box-shadow: inset 1px 0 0 rgba(31, 36, 44, 0.6);
+}
+
+/* ─────────────── TERMINAL THEME ─────────────── */
+/* Dense, monospaced, gridded — bring back ITM gradients, per-row borders,
+   uppercase headers, and the ATM ring. */
+
+body.theme-terminal .chain-table {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-feature-settings: "tnum";
+}
+body.theme-terminal .chain-table th.th-clean {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6c7480;
+  background: #0e1014;
+}
+body.theme-terminal .chain-table tbody td {
+  border-bottom: 1px solid #1f242c;
+}
+body.theme-terminal .chain-table tbody tr:nth-child(5n) td {
+  border-bottom: 1px solid #1f242c;
+}
+body.theme-terminal .itm-call { background: linear-gradient(90deg, hsla(150, 40%, 25%, 0.10), transparent); }
+body.theme-terminal .itm-put  { background: linear-gradient(-90deg, hsla(0, 40%, 25%, 0.08), transparent); }
+body.theme-terminal .chain-table tr.r-atm {
+  box-shadow: inset 0 0 0 1px hsla(45, 80%, 55%, 0.18);
+  background: transparent;
+}
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -70,92 +135,232 @@ input[type="range"].thr-range::-moz-range-thumb {
 /* Switch knob transition */
 .sw-knob { transition: left 0.15s ease; }
 
-/* ─────────────── GLASS THEME ─────────────── */
-/* Activated by toggling `theme-glass` on <body>. All overrides key off
-   existing Tailwind tokens — no component changes needed. */
+/* Strip the browser's blue focus-ring from form fields globally — components
+   provide their own focus signal (focus:border-accent on most inputs). */
+input:focus,
+input:focus-visible,
+select:focus,
+select:focus-visible,
+textarea:focus,
+textarea:focus-visible,
+button:focus,
+button:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
 
+/* Smooth bg fade when switching themes */
 body { transition: background 0.4s ease; }
 
-body.theme-glass {
-  background:
-    radial-gradient(ellipse 80% 60% at 15% 20%, hsla(280, 80%, 50%, 0.35), transparent 60%),
-    radial-gradient(ellipse 70% 50% at 85% 30%, hsla(200, 90%, 55%, 0.30), transparent 60%),
-    radial-gradient(ellipse 90% 70% at 50% 90%, hsla(330, 80%, 55%, 0.28), transparent 60%),
-    radial-gradient(ellipse 60% 50% at 90% 80%, hsla(160, 80%, 50%, 0.22), transparent 60%),
-    linear-gradient(135deg, #0a0612 0%, #0d0a1a 50%, #0a0a18 100%);
-  background-attachment: fixed;
+/* ─────────────── PAPER THEME ─────────────── */
+/* Warm off-white surface, charcoal ink — like a printed sheet */
+
+body.theme-paper {
+  background: #f6f3ed;
+  color: #1c1d1f;
+}
+body.theme-paper .bg-bg-0 { background-color: #f6f3ed !important; }
+body.theme-paper .bg-bg-1 { background-color: #fbf9f5 !important; }
+body.theme-paper .bg-bg-2 { background-color: #efece5 !important; }
+body.theme-paper .bg-bg-3 { background-color: #e6e2d8 !important; }
+body.theme-paper .bg-bg-4 { background-color: #d9d4c7 !important; }
+body.theme-paper .text-ink   { color: #1c1d1f !important; }
+body.theme-paper .text-ink-2 { color: #4a4d52 !important; }
+body.theme-paper .text-ink-3 { color: #888c92 !important; }
+body.theme-paper .text-ink-4 { color: #b4b6ba !important; }
+body.theme-paper .border-line   { border-color: #e3dfd3 !important; }
+body.theme-paper .border-line-2 { border-color: #d2cdbf !important; }
+body.theme-paper .hover\:bg-bg-2:hover { background-color: #e9e5dc !important; }
+body.theme-paper .hover\:bg-bg-3:hover { background-color: #ddd8cb !important; }
+body.theme-paper .hover\:border-line-2:hover { border-color: #c5bfae !important; }
+body.theme-paper .text-pos { color: #167d3a !important; }
+body.theme-paper .text-neg { color: #c2331a !important; }
+body.theme-paper .text-accent { color: #2563eb !important; }
+body.theme-paper .bg-pos { background-color: #167d3a !important; }
+body.theme-paper .bg-neg { background-color: #c2331a !important; }
+body.theme-paper .bg-accent { background-color: #2563eb !important; }
+body.theme-paper .border-pos { border-color: #167d3a !important; }
+body.theme-paper .border-neg { border-color: #c2331a !important; }
+body.theme-paper .border-accent { border-color: #2563eb !important; }
+/* Table specifics */
+body.theme-paper .chain-table tbody tr:nth-child(5n) td { border-bottom-color: rgba(0,0,0,0.06) !important; }
+body.theme-paper .chain-table tr.r-atm { background: rgba(37, 99, 235, 0.05) !important; }
+body.theme-paper .chain-table th.th-clean { color: #6e6f73 !important; border-bottom-color: #e3dfd3 !important; }
+body.theme-paper .chain-table tbody tr:hover { background: rgba(0,0,0,0.025) !important; }
+body.theme-paper .chain-table .custom-col { box-shadow: inset 1px 0 0 rgba(0,0,0,0.06) !important; }
+body.theme-paper ::-webkit-scrollbar-track { background: #f6f3ed; }
+body.theme-paper ::-webkit-scrollbar-thumb { background: #d2cdbf; border-color: #f6f3ed; }
+body.theme-paper ::-webkit-scrollbar-thumb:hover { background: #b4ad97; }
+/* Cell flash — softer for light bg */
+body.theme-paper .flash-up { animation: flashUpLight 0.7s ease-out; }
+body.theme-paper .flash-dn { animation: flashDnLight 0.7s ease-out; }
+/* Header soft shadow as separator */
+body.theme-paper header.bg-bg-1 { box-shadow: 0 1px 0 #e3dfd3; }
+body.theme-paper aside.bg-bg-1 { box-shadow: -1px 0 0 #e3dfd3, -16px 0 40px rgba(0,0,0,0.06); }
+
+/* ─────────────── FROST THEME ─────────────── */
+/* Pure white, cool grays, sharp blue */
+
+body.theme-frost {
+  background: #ffffff;
+  color: #0f1115;
+}
+body.theme-frost .bg-bg-0 { background-color: #f7f8fa !important; }
+body.theme-frost .bg-bg-1 { background-color: #ffffff !important; }
+body.theme-frost .bg-bg-2 { background-color: #f1f3f6 !important; }
+body.theme-frost .bg-bg-3 { background-color: #e7eaf0 !important; }
+body.theme-frost .bg-bg-4 { background-color: #d6dae3 !important; }
+body.theme-frost .text-ink   { color: #0f1115 !important; }
+body.theme-frost .text-ink-2 { color: #44495a !important; }
+body.theme-frost .text-ink-3 { color: #7a8294 !important; }
+body.theme-frost .text-ink-4 { color: #b1b7c4 !important; }
+body.theme-frost .border-line   { border-color: #e8ebf0 !important; }
+body.theme-frost .border-line-2 { border-color: #d4d9e2 !important; }
+body.theme-frost .hover\:bg-bg-2:hover { background-color: #eef0f4 !important; }
+body.theme-frost .hover\:bg-bg-3:hover { background-color: #e3e6ec !important; }
+body.theme-frost .hover\:border-line-2:hover { border-color: #c2c8d3 !important; }
+body.theme-frost .text-pos { color: #16a34a !important; }
+body.theme-frost .text-neg { color: #dc2626 !important; }
+body.theme-frost .text-accent { color: #1d4ed8 !important; }
+body.theme-frost .bg-pos { background-color: #16a34a !important; }
+body.theme-frost .bg-neg { background-color: #dc2626 !important; }
+body.theme-frost .bg-accent { background-color: #1d4ed8 !important; }
+body.theme-frost .border-pos { border-color: #16a34a !important; }
+body.theme-frost .border-neg { border-color: #dc2626 !important; }
+body.theme-frost .border-accent { border-color: #1d4ed8 !important; }
+body.theme-frost .chain-table tbody tr:nth-child(5n) td { border-bottom-color: rgba(15,17,21,0.05) !important; }
+body.theme-frost .chain-table tr.r-atm { background: rgba(29, 78, 216, 0.04) !important; }
+body.theme-frost .chain-table th.th-clean { color: #5a6275 !important; border-bottom-color: #e8ebf0 !important; }
+body.theme-frost .chain-table tbody tr:hover { background: #f7f8fa !important; }
+body.theme-frost .chain-table .custom-col { box-shadow: inset 1px 0 0 rgba(15,17,21,0.05) !important; }
+body.theme-frost ::-webkit-scrollbar-track { background: #f7f8fa; }
+body.theme-frost ::-webkit-scrollbar-thumb { background: #d4d9e2; border-color: #f7f8fa; }
+body.theme-frost ::-webkit-scrollbar-thumb:hover { background: #b1b7c4; }
+body.theme-frost .flash-up { animation: flashUpLight 0.7s ease-out; }
+body.theme-frost .flash-dn { animation: flashDnLight 0.7s ease-out; }
+body.theme-frost header.bg-bg-1 { box-shadow: 0 1px 0 #e8ebf0; }
+body.theme-frost aside.bg-bg-1 { box-shadow: -1px 0 0 #e8ebf0, -16px 0 40px rgba(15,17,21,0.05); }
+
+/* Light-theme cell flash — softer tints */
+@keyframes flashUpLight {
+  0% { background-color: hsla(140, 70%, 45%, 0.18); color: #167d3a; }
+  100% { background-color: transparent; }
+}
+@keyframes flashDnLight {
+  0% { background-color: hsla(0, 70%, 50%, 0.16); color: #c2331a; }
+  100% { background-color: transparent; }
 }
 
-/* Subtle dot texture over the gradient */
-body.theme-glass::before {
-  content: '';
-  position: fixed; inset: 0;
-  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.025) 1px, transparent 0);
-  background-size: 24px 24px;
-  pointer-events: none;
-  z-index: 0;
+/* ─────────────── FONT PAIRINGS ─────────────── */
+/* Apply via body.font-{name}. Sans = body default. Mono = .tnum / .font-mono / code / kbd. */
+
+body.font-plex { font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
+body.font-plex .font-mono,
+body.font-plex .tnum,
+body.font-plex code,
+body.font-plex kbd { font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace !important; }
+
+body.font-inter { font-family: 'Inter Tight', -apple-system, BlinkMacSystemFont, sans-serif; }
+body.font-inter .font-mono,
+body.font-inter .tnum,
+body.font-inter code,
+body.font-inter kbd { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace !important; }
+
+body.font-instrument { font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif; }
+body.font-instrument .font-mono,
+body.font-instrument .tnum,
+body.font-instrument code,
+body.font-instrument kbd { font-family: 'Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace !important; }
+/* Brand wordmark gets a serif italic accent */
+body.font-instrument .brand-wordmark {
+  font-family: 'Instrument Serif', 'Times New Roman', serif !important;
+  font-style: italic;
+  letter-spacing: -0.01em;
 }
 
-/* Surface tokens become translucent + blurred */
-body.theme-glass .bg-bg-0 { background-color: transparent !important; }
-body.theme-glass .bg-bg-1 {
-  background-color: rgba(15, 18, 28, 0.55) !important;
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
+body.font-jet {
+  font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
 }
-body.theme-glass .bg-bg-2 {
-  background-color: rgba(255, 255, 255, 0.04) !important;
-  backdrop-filter: blur(8px);
-}
-body.theme-glass .bg-bg-3 { background-color: rgba(255, 255, 255, 0.07) !important; }
-body.theme-glass .bg-bg-4 { background-color: rgba(255, 255, 255, 0.10) !important; }
+body.font-jet .font-mono,
+body.font-jet .tnum,
+body.font-jet code,
+body.font-jet kbd { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace !important; }
 
-body.theme-glass .border-line   { border-color: rgba(255, 255, 255, 0.08) !important; }
-body.theme-glass .border-line-2 { border-color: rgba(255, 255, 255, 0.14) !important; }
-body.theme-glass .hover\:border-line-2:hover { border-color: rgba(255, 255, 255, 0.20) !important; }
-body.theme-glass .hover\:bg-bg-2:hover { background-color: rgba(255, 255, 255, 0.06) !important; }
-body.theme-glass .hover\:bg-bg-3:hover { background-color: rgba(255, 255, 255, 0.10) !important; }
+/* ─────────── Light-theme readability overrides ───────────
+   Several arbitrary HSL classes (lavender code text, amber warning text,
+   gold value chips) were tuned for dark backgrounds. On Paper/Frost they
+   wash out — these rules push them to legible darker variants while
+   preserving their categorical meaning (code = blue, warning = amber, etc). */
 
-/* Side panels (RulesPanel / ColumnsPanel) — frosted aside */
-body.theme-glass aside.bg-bg-1 {
-  background-color: rgba(18, 20, 32, 0.65) !important;
-  box-shadow: -16px 0 40px rgba(0,0,0,0.5), inset 1px 0 0 rgba(255,255,255,0.06) !important;
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-}
+/* Code text — was hsl(220, 30-40%, 80-85%) lavender */
+body.theme-paper .text-\[hsl\(220\,30\%\,80\%\)\],
+body.theme-paper .text-\[hsl\(220\,40\%\,80\%\)\],
+body.theme-paper .text-\[hsl\(217\,80\%\,80\%\)\],
+body.theme-paper .text-\[hsl\(217\,80\%\,82\%\)\],
+body.theme-paper .text-\[hsl\(217\,80\%\,85\%\)\] { color: #1e3a8a !important; }
 
-/* Header */
-body.theme-glass header.bg-bg-1 {
-  background-color: rgba(15, 18, 28, 0.50) !important;
-}
+body.theme-frost .text-\[hsl\(220\,30\%\,80\%\)\],
+body.theme-frost .text-\[hsl\(220\,40\%\,80\%\)\],
+body.theme-frost .text-\[hsl\(217\,80\%\,80\%\)\],
+body.theme-frost .text-\[hsl\(217\,80\%\,82\%\)\],
+body.theme-frost .text-\[hsl\(217\,80\%\,85\%\)\] { color: #1d4ed8 !important; }
 
-/* Table floats as a glass card inside <main> */
-body.theme-glass main { padding: 14px; }
-body.theme-glass main > div:not(.flash-up):not(.flash-dn) {
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(15, 17, 25, 0.50);
-  backdrop-filter: blur(20px) saturate(160%);
-  -webkit-backdrop-filter: blur(20px) saturate(160%);
-  box-shadow: 0 24px 60px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06);
-  overflow: hidden;
-}
+/* Multiplier / purple-accent text — were hsl(280, 70%, 82-90%) lavender */
+body.theme-paper .text-\[hsl\(280\,70\%\,82\%\)\],
+body.theme-paper .text-\[hsl\(280\,70\%\,90\%\)\] { color: #6b21a8 !important; }
+body.theme-frost .text-\[hsl\(280\,70\%\,82\%\)\],
+body.theme-frost .text-\[hsl\(280\,70\%\,90\%\)\] { color: #7e22ce !important; }
+/* Multiplier chip surface — bump opacity so the chip is clearly purple on light bg */
+body.theme-paper .bg-\[hsla\(280\,40\%\,40\%\,0\.20\)\] { background-color: rgba(107, 33, 168, 0.10) !important; }
+body.theme-paper .border-\[hsla\(280\,40\%\,40\%\,0\.4\)\] { border-color: rgba(107, 33, 168, 0.30) !important; }
+body.theme-frost .bg-\[hsla\(280\,40\%\,40\%\,0\.20\)\] { background-color: rgba(126, 34, 206, 0.08) !important; }
+body.theme-frost .border-\[hsla\(280\,40\%\,40\%\,0\.4\)\] { border-color: rgba(126, 34, 206, 0.28) !important; }
 
-/* Table internals: ITM gradients off (read against glass), header semi-transparent */
-body.theme-glass .itm-call,
-body.theme-glass .itm-put { background: transparent !important; }
-body.theme-glass thead tr { background: rgba(15, 17, 25, 0.55) !important; }
-body.theme-glass thead th {
-  background: transparent !important;
-  border-bottom-color: rgba(255, 255, 255, 0.10) !important;
-}
-body.theme-glass tbody td   { border-bottom-color: rgba(255, 255, 255, 0.05) !important; }
-body.theme-glass tbody tr:hover    { background: rgba(255, 255, 255, 0.04) !important; }
-body.theme-glass tbody tr:hover td { background: transparent !important; }
-body.theme-glass .r-atm {
-  box-shadow: inset 0 0 0 1px hsla(45, 90%, 65%, 0.30) !important;
-}
+/* Field chip surface — same treatment so the blue chip reads with intent */
+body.theme-paper .bg-\[hsla\(217\,40\%\,40\%\,0\.20\)\] { background-color: rgba(37, 99, 235, 0.08) !important; }
+body.theme-paper .border-\[hsla\(217\,40\%\,40\%\,0\.4\)\] { border-color: rgba(37, 99, 235, 0.25) !important; }
+body.theme-frost .bg-\[hsla\(217\,40\%\,40\%\,0\.20\)\] { background-color: rgba(29, 78, 216, 0.08) !important; }
+body.theme-frost .border-\[hsla\(217\,40\%\,40\%\,0\.4\)\] { border-color: rgba(29, 78, 216, 0.25) !important; }
 
-/* Scrollbar — invisible track in glass mode */
-body.theme-glass ::-webkit-scrollbar-track { background: transparent; }
-body.theme-glass ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-color: transparent; }
+/* Value/threshold chip surface — same for the gold/amber */
+body.theme-paper .bg-\[hsla\(45\,60\%\,30\%\,0\.25\)\] { background-color: rgba(146, 64, 14, 0.10) !important; }
+body.theme-paper .border-\[hsla\(45\,60\%\,30\%\,0\.5\)\] { border-color: rgba(146, 64, 14, 0.30) !important; }
+body.theme-frost .bg-\[hsla\(45\,60\%\,30\%\,0\.25\)\] { background-color: rgba(180, 83, 9, 0.10) !important; }
+body.theme-frost .border-\[hsla\(45\,60\%\,30\%\,0\.5\)\] { border-color: rgba(180, 83, 9, 0.30) !important; }
+
+/* Value/threshold chips — were hsl(45, 80-90%, 70-90%) gold/cream */
+body.theme-paper .text-\[hsl\(45\,80\%\,70\%\)\],
+body.theme-paper .text-\[hsl\(45\,90\%\,70\%\)\],
+body.theme-paper .text-\[hsl\(45\,90\%\,75\%\)\],
+body.theme-paper .text-\[hsl\(45\,90\%\,85\%\)\],
+body.theme-paper .text-\[hsl\(45\,90\%\,90\%\)\] { color: #92400e !important; }
+
+body.theme-frost .text-\[hsl\(45\,80\%\,70\%\)\],
+body.theme-frost .text-\[hsl\(45\,90\%\,70\%\)\],
+body.theme-frost .text-\[hsl\(45\,90\%\,75\%\)\],
+body.theme-frost .text-\[hsl\(45\,90\%\,85\%\)\],
+body.theme-frost .text-\[hsl\(45\,90\%\,90\%\)\] { color: #b45309 !important; }
+
+/* Warning banner bg + border — softer on light themes */
+body.theme-paper .bg-\[hsla\(45\,70\%\,30\%\,0\.10\)\] { background-color: rgba(252, 211, 77, 0.20) !important; }
+body.theme-paper .border-\[hsla\(45\,70\%\,30\%\,0\.40\)\] { border-color: rgba(180, 83, 9, 0.35) !important; }
+body.theme-frost .bg-\[hsla\(45\,70\%\,30\%\,0\.10\)\] { background-color: rgba(254, 243, 199, 0.7) !important; }
+body.theme-frost .border-\[hsla\(45\,70\%\,30\%\,0\.40\)\] { border-color: rgba(217, 119, 6, 0.35) !important; }
+
+/* Compile-status pills (parsed/error) */
+body.theme-paper .bg-\[hsla\(142\,60\%\,30\%\,0\.2\)\] { background-color: rgba(22, 125, 58, 0.10) !important; }
+body.theme-paper .bg-\[hsla\(0\,60\%\,30\%\,0\.2\)\]   { background-color: rgba(194, 51, 26, 0.10) !important; }
+body.theme-frost .bg-\[hsla\(142\,60\%\,30\%\,0\.2\)\] { background-color: rgba(22, 163, 74, 0.10) !important; }
+body.theme-frost .bg-\[hsla\(0\,60\%\,30\%\,0\.2\)\]   { background-color: rgba(220, 38, 38, 0.10) !important; }
+
+/* Anything sitting on bg-accent needs white text in light themes — the
+   default `text-black` JSX class is fine on the dark theme's sky-blue accent
+   but fails contrast on Paper/Frost's saturated blue. */
+body.theme-paper .bg-accent,
+body.theme-frost .bg-accent { color: #ffffff !important; }
+body.theme-paper .bg-accent kbd,
+body.theme-frost .bg-accent kbd { color: rgba(255, 255, 255, 0.85) !important; background-color: rgba(0, 0, 0, 0.15) !important; }
+/* Hover variant — the hardcoded brighter blue also needs white text */
+body.theme-paper .hover\:bg-\[hsl\(217\,100\%\,75\%\)\]:hover,
+body.theme-frost .hover\:bg-\[hsl\(217\,100\%\,75\%\)\]:hover { background-color: #1e40af !important; color: #ffffff !important; }
+

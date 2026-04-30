@@ -31,7 +31,7 @@ The Vite dev server proxies `/api/*` and `/ws/*` to the backend.
 
 ### AI command palette (optional)
 
-Press `\` or `Cmd+K` anywhere in the app to open a natural-language command palette:
+Press `/` or `Cmd+K` anywhere in the app to open a natural-language command palette:
 
 ```
 > highlight strikes where put OI is more than 3 times call OI

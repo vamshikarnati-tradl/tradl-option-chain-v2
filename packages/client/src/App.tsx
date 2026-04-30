@@ -26,6 +26,19 @@ export function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteAnchor, setPaletteAnchor] = useState<'cursor' | { x: number; y: number }>('cursor');
+
+  const PAL_W = 460;
+  const openPaletteAtCursor = () => { setPaletteAnchor('cursor'); setPaletteOpen(true); };
+  const openPaletteCentered = () => {
+    setPaletteAnchor({
+      x: Math.max(20, (window.innerWidth - PAL_W) / 2),
+      y: Math.max(60, window.innerHeight * 0.18),
+    });
+    setPaletteOpen(true);
+  };
+  const [expanded, setExpanded] = useState<boolean>(() => localStorage.getItem('tradl.expanded') === '1');
+  useEffect(() => { localStorage.setItem('tradl.expanded', expanded ? '1' : '0'); }, [expanded]);
 
   const [hoverRow, setHoverRow] = useState<OptionChainRow | null>(null);
   const [hoverMatched, setHoverMatched] = useState<AppliedRule[] | null>(null);
@@ -42,19 +55,17 @@ export function App() {
     return () => window.removeEventListener('mousemove', onMove);
   }, []);
 
-  // Global shortcut: `\` or Cmd+K opens the AI command palette.
-  // Skip while typing in inputs/textareas/contenteditable.
+  // Global shortcut: `/` opens at the cursor; Cmd+K opens centered (the
+  // conventional "command palette" feel). Skip while typing in fields.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
       const tag = target?.tagName;
       const inField = tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable;
       const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
-      const isBackslash = e.key === '\\' && !inField;
-      if (isCmdK || isBackslash) {
-        e.preventDefault();
-        setPaletteOpen(true);
-      }
+      const isSlash = e.key === '/' && !inField;
+      if (isCmdK) { e.preventDefault(); openPaletteCentered(); }
+      else if (isSlash) { e.preventDefault(); openPaletteAtCursor(); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -157,6 +168,9 @@ export function App() {
         totalVolume={totalVolume}
         totalOI={totalOI}
         panelOpen={rulesOpen || columnsOpen}
+        expanded={expanded}
+        onToggleExpanded={() => setExpanded((v) => !v)}
+        onAsk={openPaletteCentered}
       />
 
       <main className={`flex-1 overflow-auto bg-bg-0 transition-[padding] duration-300 ${
@@ -172,6 +186,7 @@ export function App() {
           prevRowsByStrike={prevSnapshot}
           highlights={highlights}
           columnIndex={columnIndex}
+          expanded={expanded}
           onRowHover={(row, matched) => {
             setHoverRow(row);
             setHoverMatched(matched);
@@ -197,7 +212,9 @@ export function App() {
         onChange={setColumns}
       />
 
-      {hoverRow && <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={hoverMouse} />}
+      {hoverRow && !paletteOpen && (
+        <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={hoverMouse} />
+      )}
 
       <CommandPalette
         open={paletteOpen}
@@ -205,22 +222,11 @@ export function App() {
         rules={rules}
         columns={columns}
         rows={data.rows}
+        mouse={hoverMouse}
+        anchor={paletteAnchor}
         onApplyRule={(rule) => setRules((rs) => [...rs, rule])}
         onApplyColumn={(col) => setColumns((cs) => [...cs, col])}
       />
-
-      {/* Discoverable closed-state hint — bottom-left of the app */}
-      {!paletteOpen && (
-        <button
-          onClick={() => setPaletteOpen(true)}
-          title="Ask AI to add a rule or column"
-          className="fixed bottom-4 left-4 z-30 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-2/80 backdrop-blur border border-line text-ink-3 text-[11px] font-mono hover:text-ink hover:border-line-2 transition-colors shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
-        >
-          <span className="text-accent">✦</span>
-          <span>ask</span>
-          <kbd className="font-mono text-[9.5px] bg-bg-3 text-ink-2 px-1 py-0.5 rounded border border-line-2">\</kbd>
-        </button>
-      )}
     </div>
   );
 }
