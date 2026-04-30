@@ -6,7 +6,23 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { fetchOptionChain, fetchExpiries } from './nse-fetcher.js';
 import { buildSnapshot } from './data-transformer.js';
 import { buildMockSnapshot, getMockExpiries } from './mock-source.js';
+import { parseAi, type AIParseRequest } from './ai-parse.js';
 import type { OptionChainSnapshot, WsServerMessage } from './types.js';
+
+// Keep the server alive when a downstream socket dies mid-write (EPIPE) or a
+// background promise rejects. Without these, a single failed AI parse with a
+// disconnected client crashes the process and the data WS goes with it.
+process.on('uncaughtException', (err) => {
+  const code = (err as NodeJS.ErrnoException).code;
+  if (code === 'EPIPE' || code === 'ECONNRESET') {
+    console.warn(`[server] benign socket error: ${code}`);
+    return;
+  }
+  console.error('[server] uncaughtException:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason);
+});
 
 const PORT = Number(process.env.PORT ?? 4000);
 const DATA_SOURCE = (process.env.DATA_SOURCE ?? 'mock').toLowerCase() as 'nse' | 'mock';
@@ -29,6 +45,7 @@ async function listExpiries(symbol: string): Promise<string[]> {
 
 const app = express();
 app.use(cors());
+app.use(express.json({ limit: '32kb' }));
 
 interface SymbolState {
   latest: OptionChainSnapshot | null;
@@ -94,7 +111,35 @@ function broadcast(symbol: string, msg: WsServerMessage): void {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true, uptime: process.uptime() });
+  res.json({ ok: true, uptime: process.uptime(), aiConfigured: !!process.env.ANTHROPIC_API_KEY });
+});
+
+app.post('/api/ai/parse', async (req, res) => {
+  const body = req.body as Partial<AIParseRequest> | undefined;
+  if (!body?.input || typeof body.input !== 'string') {
+    return res.status(400).json({ error: 'input (string) is required' });
+  }
+  if (body.input.length > 1000) {
+    return res.status(400).json({ error: 'input is too long (max 1000 chars)' });
+  }
+  try {
+    const result = await parseAi({
+      input: body.input,
+      availableFields: Array.isArray(body.availableFields) ? body.availableFields : [],
+      existingRules: Array.isArray(body.existingRules) ? body.existingRules : [],
+      existingColumns: Array.isArray(body.existingColumns) ? body.existingColumns : [],
+    });
+    if (res.writableEnded) return;
+    res.json(result);
+  } catch (err) {
+    if (res.writableEnded) return;
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('ANTHROPIC_API_KEY')) {
+      return res.status(503).json({ error: 'AI is not configured on the server (set ANTHROPIC_API_KEY)' });
+    }
+    console.error('[ai/parse] failed:', message);
+    res.status(502).json({ error: message });
+  }
 });
 
 app.get('/api/symbols', (_req, res) => {

@@ -29,6 +29,26 @@ npm run dev:client   # http://localhost:5173
 
 The Vite dev server proxies `/api/*` and `/ws/*` to the backend.
 
+### AI command palette (optional)
+
+Press `\` or `Cmd+K` anywhere in the app to open a natural-language command palette:
+
+```
+> highlight strikes where put OI is more than 3 times call OI
+> add a column for straddle price
+> moneyness as a percentage
+```
+
+Haiku 4.5 parses the input into a strict JSON rule or column definition (via Anthropic's structured outputs) which drops straight into the same engine the manual editor uses.
+
+To enable, set `ANTHROPIC_API_KEY` in `.env` at the repo root:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Without the key, the rest of the app works fine — only the palette returns a 503. The key is read by the server (`tsx --env-file=../../.env`) and never leaves the backend; the client only sees the parsed JSON.
+
 ## Data source
 
 The backend supports two sources, selected by `DATA_SOURCE` env var:
@@ -50,13 +70,14 @@ The mock generator produces data with the same shape and semantics as NSE, so th
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/health` | Liveness check |
+| GET | `/api/health` | Liveness check + AI key presence |
 | GET | `/api/symbols` | Supported symbols |
 | GET | `/api/expiries/:symbol` | Available expiries |
 | GET | `/api/option-chain/:symbol?expiry=...` | One-shot snapshot |
 | WS  | `/ws/option-chain/:symbol` | Push snapshots on each poll |
+| POST | `/api/ai/parse` | Parse natural language → rule or column JSON (Haiku 4.5) |
 
-Supported symbols: `NIFTY`, `BANKNIFTY`, `FINNIFTY`.
+Supported symbols: `NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`.
 
 ## Architecture (Pass B)
 

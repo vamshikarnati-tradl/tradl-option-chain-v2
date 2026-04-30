@@ -4,6 +4,7 @@ import { OptionChainTable } from './components/OptionChainTable';
 import { RulesPanel } from './components/RulesPanel';
 import { ColumnsPanel } from './components/ColumnsPanel';
 import { HoverTooltip } from './components/HoverTooltip';
+import { CommandPalette } from './components/CommandPalette';
 import { useOptionChain } from './hooks/useOptionChain';
 import { useComputeEngine } from './hooks/useComputeEngine';
 import { loadColumns, loadRules, saveColumns, saveRules } from './core/persistence';
@@ -24,6 +25,7 @@ export function App() {
 
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   const [hoverRow, setHoverRow] = useState<OptionChainRow | null>(null);
   const [hoverMatched, setHoverMatched] = useState<AppliedRule[] | null>(null);
@@ -38,6 +40,24 @@ export function App() {
     const onMove = (e: MouseEvent) => setHoverMouse({ x: e.clientX, y: e.clientY });
     window.addEventListener('mousemove', onMove);
     return () => window.removeEventListener('mousemove', onMove);
+  }, []);
+
+  // Global shortcut: `\` or Cmd+K opens the AI command palette.
+  // Skip while typing in inputs/textareas/contenteditable.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable;
+      const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+      const isBackslash = e.key === '\\' && !inField;
+      if (isCmdK || isBackslash) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
   }, []);
 
   // Fetch expiries when symbol changes
@@ -178,6 +198,29 @@ export function App() {
       />
 
       {hoverRow && <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={hoverMouse} />}
+
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        rules={rules}
+        columns={columns}
+        rows={data.rows}
+        onApplyRule={(rule) => setRules((rs) => [...rs, rule])}
+        onApplyColumn={(col) => setColumns((cs) => [...cs, col])}
+      />
+
+      {/* Discoverable closed-state hint — bottom-left of the app */}
+      {!paletteOpen && (
+        <button
+          onClick={() => setPaletteOpen(true)}
+          title="Ask AI to add a rule or column"
+          className="fixed bottom-4 left-4 z-30 inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md bg-bg-2/80 backdrop-blur border border-line text-ink-3 text-[11px] font-mono hover:text-ink hover:border-line-2 transition-colors shadow-[0_4px_16px_rgba(0,0,0,0.4)]"
+        >
+          <span className="text-accent">✦</span>
+          <span>ask</span>
+          <kbd className="font-mono text-[9.5px] bg-bg-3 text-ink-2 px-1 py-0.5 rounded border border-line-2">\</kbd>
+        </button>
+      )}
     </div>
   );
 }
