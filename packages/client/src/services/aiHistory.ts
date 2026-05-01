@@ -1,7 +1,9 @@
 // Local-only history of recent natural-language queries that resulted in an
 // applied rule or column. Persisted to localStorage; capped at 8 entries.
 
-const KEY = 'tradl.palette.recent';
+import { STORAGE_KEYS } from '../core/storage-keys';
+
+const KEY = STORAGE_KEYS.paletteRecent;
 const MAX = 8;
 
 export interface RecentEntry {

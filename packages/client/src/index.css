@@ -179,6 +179,8 @@ body.theme-paper .text-accent { color: #2563eb !important; }
 body.theme-paper .bg-pos { background-color: #167d3a !important; }
 body.theme-paper .bg-neg { background-color: #c2331a !important; }
 body.theme-paper .bg-accent { background-color: #2563eb !important; }
+body.theme-paper .bg-accent-hover { background-color: #1e40af !important; }
+body.theme-paper .hover\:bg-accent-hover:hover { background-color: #1e40af !important; color: #ffffff !important; }
 body.theme-paper .border-pos { border-color: #167d3a !important; }
 body.theme-paper .border-neg { border-color: #c2331a !important; }
 body.theme-paper .border-accent { border-color: #2563eb !important; }
@@ -225,6 +227,8 @@ body.theme-frost .text-accent { color: #1d4ed8 !important; }
 body.theme-frost .bg-pos { background-color: #16a34a !important; }
 body.theme-frost .bg-neg { background-color: #dc2626 !important; }
 body.theme-frost .bg-accent { background-color: #1d4ed8 !important; }
+body.theme-frost .bg-accent-hover { background-color: #1e3a8a !important; }
+body.theme-frost .hover\:bg-accent-hover:hover { background-color: #1e3a8a !important; color: #ffffff !important; }
 body.theme-frost .border-pos { border-color: #16a34a !important; }
 body.theme-frost .border-neg { border-color: #dc2626 !important; }
 body.theme-frost .border-accent { border-color: #1d4ed8 !important; }
@@ -287,71 +291,53 @@ body.font-jet code,
 body.font-jet kbd { font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace !important; }
 
 /* ─────────── Light-theme readability overrides ───────────
-   Several arbitrary HSL classes (lavender code text, amber warning text,
-   gold value chips) were tuned for dark backgrounds. On Paper/Frost they
-   wash out — these rules push them to legible darker variants while
-   preserving their categorical meaning (code = blue, warning = amber, etc). */
+   Semantic chip/code/warning color tokens (defined in tailwind.config.js)
+   were tuned for dark backgrounds. Push them to legible darker variants
+   on Paper/Frost — Chip, ConditionRow, code blocks, warning banners. */
 
-/* Code text — was hsl(220, 30-40%, 80-85%) lavender */
-body.theme-paper .text-\[hsl\(220\,30\%\,80\%\)\],
-body.theme-paper .text-\[hsl\(220\,40\%\,80\%\)\],
-body.theme-paper .text-\[hsl\(217\,80\%\,80\%\)\],
-body.theme-paper .text-\[hsl\(217\,80\%\,82\%\)\],
-body.theme-paper .text-\[hsl\(217\,80\%\,85\%\)\] { color: #1e3a8a !important; }
+/* Code text — `text-codeblock`, `text-field` (lavender on dark) */
+body.theme-paper .text-codeblock,
+body.theme-paper .text-field { color: #1e3a8a !important; }
+body.theme-frost .text-codeblock,
+body.theme-frost .text-field { color: #1d4ed8 !important; }
 
-body.theme-frost .text-\[hsl\(220\,30\%\,80\%\)\],
-body.theme-frost .text-\[hsl\(220\,40\%\,80\%\)\],
-body.theme-frost .text-\[hsl\(217\,80\%\,80\%\)\],
-body.theme-frost .text-\[hsl\(217\,80\%\,82\%\)\],
-body.theme-frost .text-\[hsl\(217\,80\%\,85\%\)\] { color: #1d4ed8 !important; }
+/* Multiplier — purple-accent text */
+body.theme-paper .text-multiplier { color: #6b21a8 !important; }
+body.theme-frost .text-multiplier { color: #7e22ce !important; }
+body.theme-paper .bg-chip-mult { background-color: rgba(107, 33, 168, 0.10) !important; }
+body.theme-paper .border-chip-mult-border { border-color: rgba(107, 33, 168, 0.30) !important; }
+body.theme-frost .bg-chip-mult { background-color: rgba(126, 34, 206, 0.08) !important; }
+body.theme-frost .border-chip-mult-border { border-color: rgba(126, 34, 206, 0.28) !important; }
 
-/* Multiplier / purple-accent text — were hsl(280, 70%, 82-90%) lavender */
-body.theme-paper .text-\[hsl\(280\,70\%\,82\%\)\],
-body.theme-paper .text-\[hsl\(280\,70\%\,90\%\)\] { color: #6b21a8 !important; }
-body.theme-frost .text-\[hsl\(280\,70\%\,82\%\)\],
-body.theme-frost .text-\[hsl\(280\,70\%\,90\%\)\] { color: #7e22ce !important; }
-/* Multiplier chip surface — bump opacity so the chip is clearly purple on light bg */
-body.theme-paper .bg-\[hsla\(280\,40\%\,40\%\,0\.20\)\] { background-color: rgba(107, 33, 168, 0.10) !important; }
-body.theme-paper .border-\[hsla\(280\,40\%\,40\%\,0\.4\)\] { border-color: rgba(107, 33, 168, 0.30) !important; }
-body.theme-frost .bg-\[hsla\(280\,40\%\,40\%\,0\.20\)\] { background-color: rgba(126, 34, 206, 0.08) !important; }
-body.theme-frost .border-\[hsla\(280\,40\%\,40\%\,0\.4\)\] { border-color: rgba(126, 34, 206, 0.28) !important; }
+/* Field chip surface — blue chip needs visible tint on light bg */
+body.theme-paper .bg-chip-field { background-color: rgba(37, 99, 235, 0.08) !important; }
+body.theme-paper .border-chip-field-border { border-color: rgba(37, 99, 235, 0.25) !important; }
+body.theme-frost .bg-chip-field { background-color: rgba(29, 78, 216, 0.08) !important; }
+body.theme-frost .border-chip-field-border { border-color: rgba(29, 78, 216, 0.25) !important; }
 
-/* Field chip surface — same treatment so the blue chip reads with intent */
-body.theme-paper .bg-\[hsla\(217\,40\%\,40\%\,0\.20\)\] { background-color: rgba(37, 99, 235, 0.08) !important; }
-body.theme-paper .border-\[hsla\(217\,40\%\,40\%\,0\.4\)\] { border-color: rgba(37, 99, 235, 0.25) !important; }
-body.theme-frost .bg-\[hsla\(217\,40\%\,40\%\,0\.20\)\] { background-color: rgba(29, 78, 216, 0.08) !important; }
-body.theme-frost .border-\[hsla\(217\,40\%\,40\%\,0\.4\)\] { border-color: rgba(29, 78, 216, 0.25) !important; }
+/* Value/threshold chip surface — amber on light bg */
+body.theme-paper .bg-chip-value { background-color: rgba(146, 64, 14, 0.10) !important; }
+body.theme-paper .border-chip-value-border { border-color: rgba(146, 64, 14, 0.30) !important; }
+body.theme-frost .bg-chip-value { background-color: rgba(180, 83, 9, 0.10) !important; }
+body.theme-frost .border-chip-value-border { border-color: rgba(180, 83, 9, 0.30) !important; }
 
-/* Value/threshold chip surface — same for the gold/amber */
-body.theme-paper .bg-\[hsla\(45\,60\%\,30\%\,0\.25\)\] { background-color: rgba(146, 64, 14, 0.10) !important; }
-body.theme-paper .border-\[hsla\(45\,60\%\,30\%\,0\.5\)\] { border-color: rgba(146, 64, 14, 0.30) !important; }
-body.theme-frost .bg-\[hsla\(45\,60\%\,30\%\,0\.25\)\] { background-color: rgba(180, 83, 9, 0.10) !important; }
-body.theme-frost .border-\[hsla\(45\,60\%\,30\%\,0\.5\)\] { border-color: rgba(180, 83, 9, 0.30) !important; }
-
-/* Value/threshold chips — were hsl(45, 80-90%, 70-90%) gold/cream */
-body.theme-paper .text-\[hsl\(45\,80\%\,70\%\)\],
-body.theme-paper .text-\[hsl\(45\,90\%\,70\%\)\],
-body.theme-paper .text-\[hsl\(45\,90\%\,75\%\)\],
-body.theme-paper .text-\[hsl\(45\,90\%\,85\%\)\],
-body.theme-paper .text-\[hsl\(45\,90\%\,90\%\)\] { color: #92400e !important; }
-
-body.theme-frost .text-\[hsl\(45\,80\%\,70\%\)\],
-body.theme-frost .text-\[hsl\(45\,90\%\,70\%\)\],
-body.theme-frost .text-\[hsl\(45\,90\%\,75\%\)\],
-body.theme-frost .text-\[hsl\(45\,90\%\,85\%\)\],
-body.theme-frost .text-\[hsl\(45\,90\%\,90\%\)\] { color: #b45309 !important; }
+/* Value/threshold chip text + warning text — gold/amber */
+body.theme-paper .text-value,
+body.theme-paper .text-warning { color: #92400e !important; }
+body.theme-frost .text-value,
+body.theme-frost .text-warning { color: #b45309 !important; }
 
 /* Warning banner bg + border — softer on light themes */
-body.theme-paper .bg-\[hsla\(45\,70\%\,30\%\,0\.10\)\] { background-color: rgba(252, 211, 77, 0.20) !important; }
-body.theme-paper .border-\[hsla\(45\,70\%\,30\%\,0\.40\)\] { border-color: rgba(180, 83, 9, 0.35) !important; }
-body.theme-frost .bg-\[hsla\(45\,70\%\,30\%\,0\.10\)\] { background-color: rgba(254, 243, 199, 0.7) !important; }
-body.theme-frost .border-\[hsla\(45\,70\%\,30\%\,0\.40\)\] { border-color: rgba(217, 119, 6, 0.35) !important; }
+body.theme-paper .bg-warn-banner { background-color: rgba(252, 211, 77, 0.20) !important; }
+body.theme-paper .border-warn-banner-border { border-color: rgba(180, 83, 9, 0.35) !important; }
+body.theme-frost .bg-warn-banner { background-color: rgba(254, 243, 199, 0.7) !important; }
+body.theme-frost .border-warn-banner-border { border-color: rgba(217, 119, 6, 0.35) !important; }
 
-/* Compile-status pills (parsed/error) */
-body.theme-paper .bg-\[hsla\(142\,60\%\,30\%\,0\.2\)\] { background-color: rgba(22, 125, 58, 0.10) !important; }
-body.theme-paper .bg-\[hsla\(0\,60\%\,30\%\,0\.2\)\]   { background-color: rgba(194, 51, 26, 0.10) !important; }
-body.theme-frost .bg-\[hsla\(142\,60\%\,30\%\,0\.2\)\] { background-color: rgba(22, 163, 74, 0.10) !important; }
-body.theme-frost .bg-\[hsla\(0\,60\%\,30\%\,0\.2\)\]   { background-color: rgba(220, 38, 38, 0.10) !important; }
+/* Compile-status pill backgrounds (parsed/error) */
+body.theme-paper .bg-pill-pos { background-color: rgba(22, 125, 58, 0.10) !important; }
+body.theme-paper .bg-pill-neg { background-color: rgba(194, 51, 26, 0.10) !important; }
+body.theme-frost .bg-pill-pos { background-color: rgba(22, 163, 74, 0.10) !important; }
+body.theme-frost .bg-pill-neg { background-color: rgba(220, 38, 38, 0.10) !important; }
 
 /* Anything sitting on bg-accent needs white text in light themes — the
    default `text-black` JSX class is fine on the dark theme's sky-blue accent
@@ -360,7 +346,3 @@ body.theme-paper .bg-accent,
 body.theme-frost .bg-accent { color: #ffffff !important; }
 body.theme-paper .bg-accent kbd,
 body.theme-frost .bg-accent kbd { color: rgba(255, 255, 255, 0.85) !important; background-color: rgba(0, 0, 0, 0.15) !important; }
-/* Hover variant — the hardcoded brighter blue also needs white text */
-body.theme-paper .hover\:bg-\[hsl\(217\,100\%\,75\%\)\]:hover,
-body.theme-frost .hover\:bg-\[hsl\(217\,100\%\,75\%\)\]:hover { background-color: #1e40af !important; color: #ffffff !important; }
-

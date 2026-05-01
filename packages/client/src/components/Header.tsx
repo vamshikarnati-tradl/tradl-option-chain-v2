@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 import { Dropdown } from './Dropdown';
+import { Kbd, ToolbarButton } from './atoms';
 import { fmtChange, fmtCompact, fmtNum, timeAgo } from '../utils/format';
 import { NEXT_THEME, THEME_LABELS, useTheme, type Theme } from '../hooks/useTheme';
-
-const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
 
 interface ConnDotProps {
   connected: boolean;
@@ -29,9 +28,10 @@ function ConnectionDot({ connected, lastUpdate }: ConnDotProps) {
   );
 }
 
-interface Props {
-  symbol: string;
-  setSymbol: (s: string) => void;
+interface Props<S extends string> {
+  symbol: S;
+  symbols: readonly S[];
+  setSymbol: (s: S) => void;
   expiry: string;
   setExpiry: (e: string) => void;
   expiries: string[];
@@ -54,13 +54,13 @@ interface Props {
   onAsk: () => void;
 }
 
-export function Header({
-  symbol, setSymbol, expiry, setExpiry, expiries,
+export function Header<S extends string>({
+  symbol, symbols, setSymbol, expiry, setExpiry, expiries,
   spot, spotChange, spotPct,
   rulesOpen, columnsOpen, onToggleRules, onToggleColumns,
   ruleCount, columnCount, lastUpdate, connected, totalVolume, totalOI,
   panelOpen, expanded, onToggleExpanded, onAsk,
-}: Props) {
+}: Props<S>) {
   const [theme, setTheme] = useTheme();
   const next: Theme = NEXT_THEME[theme];
   return (
@@ -73,7 +73,7 @@ export function Header({
             <span className="text-ink-3 font-normal">/option-chain</span>
           </span>
         </div>
-        <Dropdown value={symbol} options={SYMBOLS} onChange={setSymbol} width={120} />
+        <Dropdown value={symbol} options={symbols} onChange={setSymbol} width={120} />
         <Dropdown value={expiry} options={expiries.length ? expiries : [expiry]} onChange={setExpiry} label="exp" width={150} />
       </div>
 
@@ -97,47 +97,21 @@ export function Header({
 
       <div className="flex items-center gap-3">
         <ConnectionDot connected={connected} lastUpdate={lastUpdate} />
-        <button
-          onClick={onAsk}
-          title="Ask AI to add a rule or column"
-          className="flex items-center gap-1.5 h-7 px-2.5 rounded-md border border-line-2 bg-transparent text-ink-2 text-xs font-medium hover:bg-bg-2 hover:text-ink transition-all"
-        >
+        <ToolbarButton onClick={onAsk} title="Ask AI to add a rule or column">
           <span className="text-accent leading-none">✦</span>
           <span>Ask</span>
-          <kbd className="font-mono text-[10px] bg-bg-3 text-ink-2 px-1 py-0.5 rounded border border-line-2">/</kbd>
-        </button>
-        <button
-          onClick={onToggleRules}
-          className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs font-medium transition-all ${
-            rulesOpen
-              ? 'bg-bg-3 text-ink border-accent'
-              : 'bg-transparent text-ink-2 border-line-2 hover:bg-bg-2 hover:text-ink'
-          }`}
-        >
+          <Kbd>/</Kbd>
+        </ToolbarButton>
+        <ToolbarButton active={rulesOpen} onClick={onToggleRules}>
           <Icon name="bolt" size={14} />
           <span>Rules</span>
-          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded min-w-[16px] text-center ${
-            rulesOpen ? 'bg-accent text-black font-semibold' : 'bg-bg-3 text-ink-2'
-          }`}>
-            {ruleCount}
-          </span>
-        </button>
-        <button
-          onClick={onToggleColumns}
-          className={`flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-xs font-medium transition-all ${
-            columnsOpen
-              ? 'bg-bg-3 text-ink border-accent'
-              : 'bg-transparent text-ink-2 border-line-2 hover:bg-bg-2 hover:text-ink'
-          }`}
-        >
+          <CountBadge active={rulesOpen}>{ruleCount}</CountBadge>
+        </ToolbarButton>
+        <ToolbarButton active={columnsOpen} onClick={onToggleColumns}>
           <Icon name="columns" size={14} />
           <span>Columns</span>
-          <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded min-w-[16px] text-center ${
-            columnsOpen ? 'bg-accent text-black font-semibold' : 'bg-bg-3 text-ink-2'
-          }`}>
-            {columnCount}
-          </span>
-        </button>
+          <CountBadge active={columnsOpen}>{columnCount}</CountBadge>
+        </ToolbarButton>
         <button
           title={`Theme: ${THEME_LABELS[theme]} — click for ${THEME_LABELS[next]}`}
           onClick={() => setTheme(next)}
@@ -179,6 +153,16 @@ export function Header({
         </button>
       </div>
     </header>
+  );
+}
+
+function CountBadge({ active, children }: { active: boolean; children: React.ReactNode }) {
+  return (
+    <span className={`font-mono text-[10px] px-1.5 py-0.5 rounded min-w-[16px] text-center ${
+      active ? 'bg-accent text-black font-semibold' : 'bg-bg-3 text-ink-2'
+    }`}>
+      {children}
+    </span>
   );
 }
 

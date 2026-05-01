@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
+import { ConditionChips } from './ConditionChips';
+import { GhostBtn, PrimaryBtn, Switch } from './atoms';
 import { fmtCompact } from '../utils/format';
 import { PALETTE_HUES, nextUnusedHue, ruleFg, ruleHsl } from '../core/palette';
 import type { Condition, NumericField, Operator, RuleDefinition, RuleSlider } from '../core/types';
@@ -115,23 +117,16 @@ function RuleCard({
   onToggleExpand, onToggleEnabled, onUpdate, onDelete, isUserCreated,
 }: CardProps) {
   const sliderValue = getSliderValue(rule);
+  const liveRhsAt = rule.slider && sliderValue != null
+    ? { index: rule.slider.conditionIndex, value: sliderValue }
+    : undefined;
 
   return (
     <div className={`rounded-lg mb-1.5 border transition-colors ${
       expanded ? 'border-line-2 bg-bg-2' : 'border-line bg-bg-2 hover:border-line-2'
     } ${rule.enabled ? '' : 'opacity-60'}`}>
       <div className="flex items-center gap-2.5 p-3 cursor-pointer" onClick={onToggleExpand}>
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggleEnabled(); }}
-          aria-label="Toggle rule"
-          className={`relative w-7 h-4 rounded-full p-0 border-0 shrink-0 transition-colors ${
-            rule.enabled ? 'bg-accent' : 'bg-bg-4'
-          }`}
-        >
-          <span className={`sw-knob absolute top-0.5 w-3 h-3 bg-white rounded-full ${
-            rule.enabled ? 'left-[14px]' : 'left-0.5'
-          }`} />
-        </button>
+        <Switch checked={rule.enabled} onChange={onToggleEnabled} ariaLabel="Toggle rule" />
         <span className="w-2 h-2 rounded-sm shrink-0" style={{ background: ruleHsl(rule.style.hue, 0.9) }} />
         <div className="flex-1 min-w-0">
           <div className="text-[12.5px] font-medium text-ink">{rule.name}</div>
@@ -154,7 +149,7 @@ function RuleCard({
       </div>
 
       {error && (
-        <div className="mx-3 mb-2 text-[10px] text-neg bg-[hsla(0,60%,30%,0.2)] border border-[hsla(0,60%,30%,0.6)] rounded px-2 py-1 font-mono">
+        <div className="mx-3 mb-2 text-[10px] text-neg bg-pill-neg border border-pill-neg-border rounded px-2 py-1 font-mono">
           {error}
         </div>
       )}
@@ -169,19 +164,8 @@ function RuleCard({
 
           <div className="mb-3">
             <div className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em] mb-1.5">Conditions</div>
-            <div className="flex flex-wrap gap-1.5">
-              {rule.conditions.map((c, i) => (
-                <div key={i} className="inline-flex items-center gap-1.5 bg-bg-3 px-2 py-1 rounded font-mono text-[11px]">
-                  <span className="text-ink">{c.lhs.kind === 'field' ? c.lhs.field : c.lhs.expression}</span>
-                  <span className="text-ink-3">{OP_OPTIONS.find((o) => o.v === c.operator)?.l ?? c.operator}</span>
-                  <span className="text-[hsl(45,80%,70%)]">
-                    {c.rhs.kind === 'literal' ? c.rhs.value
-                      : c.rhs.kind === 'field' ? c.rhs.field
-                      : c.rhs.kind === 'expr' ? c.rhs.expression
-                      : `[${c.rhs.value[0]}, ${c.rhs.value[1]}]`}
-                  </span>
-                </div>
-              ))}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <ConditionChips conditions={rule.conditions} logic={rule.logic} size="sm" liveRhsAt={liveRhsAt} />
             </div>
           </div>
 
@@ -295,12 +279,8 @@ function RuleBuilder({ existing, onCreate, onCancel }: BuilderProps) {
       </div>
 
       <div className="flex gap-1.5 justify-end mt-1.5">
-        <button onClick={onCancel} className="inline-flex items-center gap-1.5 justify-center px-3 py-1.5 rounded text-xs font-medium bg-transparent text-ink-2 hover:bg-bg-3 hover:text-ink transition-colors border border-transparent">Cancel</button>
-        <button
-          onClick={create}
-          disabled={!name.trim()}
-          className="inline-flex items-center gap-1.5 justify-center px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] disabled:bg-bg-3 disabled:text-ink-4 disabled:cursor-not-allowed transition-colors border border-transparent"
-        >Add rule</button>
+        <GhostBtn onClick={onCancel}>Cancel</GhostBtn>
+        <PrimaryBtn onClick={create} disabled={!name.trim()}>Add rule</PrimaryBtn>
       </div>
     </div>
   );
@@ -377,12 +357,9 @@ export function RulesPanel({
       </div>
 
       <div className="p-3 border-t border-line shrink-0">
-        <button
-          onClick={() => setBuilding(true)}
-          className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
-        >
+        <PrimaryBtn onClick={() => setBuilding(true)} className="w-full">
           <Icon name="plus" size={14} /> New rule
-        </button>
+        </PrimaryBtn>
       </div>
 
       <Modal

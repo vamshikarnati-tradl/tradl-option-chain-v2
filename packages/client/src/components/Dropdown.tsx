@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
 
-interface Props {
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
+interface Props<T extends string> {
+  value: T;
+  options: readonly T[];
+  onChange: (v: T) => void;
   label?: string;
   width?: number;
 }
 
-export function Dropdown({ value, options, onChange, label, width = 130 }: Props) {
+// Generic over the option type so callers don't need `as Symbol` / `as Theme`
+// casts on the onChange handler.
+export function Dropdown<T extends string>({ value, options, onChange, label, width = 130 }: Props<T>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

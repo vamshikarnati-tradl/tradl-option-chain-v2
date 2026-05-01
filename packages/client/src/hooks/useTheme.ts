@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { STORAGE_KEYS } from '../core/storage-keys';
 
 export type Theme = 'paper' | 'frost' | 'clean' | 'terminal';
-const KEY = 'tradl.theme';
+const KEY = STORAGE_KEYS.theme;
 const VALID: readonly Theme[] = ['paper', 'frost', 'clean', 'terminal'];
 
 export function useTheme(): [Theme, (t: Theme) => void] {

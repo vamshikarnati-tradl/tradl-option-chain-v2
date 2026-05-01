@@ -44,25 +44,19 @@ export class AIParseError extends Error {
   }
 }
 
-interface Request {
+export interface AIParseRequest {
   input: string;
   availableFields: string[];
   existingRules: string[];
   existingColumns: string[];
-  signal?: AbortSignal;
 }
 
-export async function parseNaturalLanguage(req: Request): Promise<AIParseResult> {
+export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSignal): Promise<AIParseResult> {
   const res = await fetch('/api/ai/parse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      input: req.input,
-      availableFields: req.availableFields,
-      existingRules: req.existingRules,
-      existingColumns: req.existingColumns,
-    }),
-    signal: req.signal,
+    body: JSON.stringify(req),
+    signal,
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));

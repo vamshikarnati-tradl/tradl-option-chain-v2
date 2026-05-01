@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
+import { GhostBtn, PrimaryBtn } from './atoms';
 import { fmtNum } from '../utils/format';
 import { extractDependencies, parseExpression } from '../core/expression-parser';
 import { evaluate } from '../core/expression-evaluator';
@@ -55,7 +56,7 @@ interface CardProps {
 
 function ColumnCard({ col, valid, error, sampleValue, deps, isPreset, onDelete }: CardProps) {
   return (
-    <div className={`bg-bg-2 rounded-lg py-2.5 px-3 mb-1.5 border ${valid ? 'border-line' : 'border-[hsl(0,50%,35%)]'}`}>
+    <div className={`bg-bg-2 rounded-lg py-2.5 px-3 mb-1.5 border ${valid ? 'border-line' : 'border-neg/60'}`}>
       <div className="flex items-center justify-between mb-1.5">
         <div className="text-[12.5px] font-medium">{col.name}</div>
         {isPreset ? (
@@ -66,7 +67,7 @@ function ColumnCard({ col, valid, error, sampleValue, deps, isPreset, onDelete }
           </button>
         )}
       </div>
-      <code className="block bg-bg-1 border border-line px-2 py-1.5 rounded font-mono text-[11px] text-[hsl(220,30%,80%)] break-all mb-1.5">{col.expression}</code>
+      <code className="block bg-bg-1 border border-line px-2 py-1.5 rounded font-mono text-[11px] text-codeblock break-all mb-1.5">{col.expression}</code>
       <div className="flex justify-between font-mono text-[10.5px]">
         <span className="text-ink-3">{deps.length ? deps.join(' · ') : 'no fields'}</span>
         {valid ? (
@@ -126,10 +127,10 @@ function ExpressionInput({ value, onChange }: ExprInputProps) {
             <div>
               <div className="font-mono text-[9.5px] text-ink-3 uppercase tracking-[0.08em] mb-1.5">Examples</div>
               <ul className="list-none p-0 m-0 text-[11px] text-ink-2">
-                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-[hsl(220,40%,80%)] mr-1">put_oi / call_oi</code> — PCR</li>
-                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-[hsl(220,40%,80%)] mr-1">call_ltp + put_ltp</code> — straddle</li>
-                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-[hsl(220,40%,80%)] mr-1">abs(call_iv - put_iv)</code> — IV gap</li>
-                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-[hsl(220,40%,80%)] mr-1">(strikePrice - underlyingValue) / underlyingValue * 100</code> — moneyness%</li>
+                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-codeblock mr-1">put_oi / call_oi</code> — PCR</li>
+                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-codeblock mr-1">call_ltp + put_ltp</code> — straddle</li>
+                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-codeblock mr-1">abs(call_iv - put_iv)</code> — IV gap</li>
+                <li className="py-0.5"><code className="bg-bg-3 px-1 py-px rounded font-mono text-[10.5px] text-codeblock mr-1">(strikePrice - underlyingValue) / underlyingValue * 100</code> — moneyness%</li>
               </ul>
             </div>
           </div>
@@ -190,7 +191,7 @@ function ColumnBuilder({ sampleRow, onCreate, onCancel }: BuilderProps) {
 
       {compiled && (
         <div className={`flex items-center gap-1.5 font-mono text-[10.5px] px-2 py-1.5 rounded mb-2.5 ${
-          compiled.ok ? 'bg-[hsla(142,60%,30%,0.2)] text-pos' : 'bg-[hsla(0,60%,30%,0.2)] text-neg'
+          compiled.ok ? 'bg-pill-pos text-pos' : 'bg-pill-neg text-neg'
         }`}>
           {compiled.ok ? (
             <>
@@ -223,11 +224,8 @@ function ColumnBuilder({ sampleRow, onCreate, onCancel }: BuilderProps) {
       </div>
 
       <div className="flex gap-1.5 justify-end mt-1.5">
-        <button onClick={onCancel} className="inline-flex items-center gap-1.5 justify-center px-3 py-1.5 rounded text-xs font-medium bg-transparent text-ink-2 hover:bg-bg-3 hover:text-ink transition-colors border border-transparent">Cancel</button>
-        <button onClick={create} disabled={!valid}
-          className="inline-flex items-center gap-1.5 justify-center px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] disabled:bg-bg-3 disabled:text-ink-4 disabled:cursor-not-allowed transition-colors border border-transparent">
-          Add column
-        </button>
+        <GhostBtn onClick={onCancel}>Cancel</GhostBtn>
+        <PrimaryBtn onClick={create} disabled={!valid}>Add column</PrimaryBtn>
       </div>
     </div>
   );
@@ -277,7 +275,7 @@ export function ColumnsPanel({ open, onClose, columns, columnErrors, sampleRow, 
             <p className="m-0 mb-1.5 text-[12.5px]">No custom columns yet.</p>
             <p className="text-[11px] leading-[1.6] max-w-[240px]">
               Build columns from raw fields with expressions like{' '}
-              <code className="bg-bg-3 px-1 py-px rounded font-mono text-[10px] text-[hsl(220,40%,80%)]">put_oi / call_oi</code>.
+              <code className="bg-bg-3 px-1 py-px rounded font-mono text-[10px] text-codeblock">put_oi / call_oi</code>.
             </p>
           </div>
         )}
@@ -304,12 +302,9 @@ export function ColumnsPanel({ open, onClose, columns, columnErrors, sampleRow, 
       </div>
 
       <div className="p-3 border-t border-line shrink-0">
-        <button
-          onClick={() => setBuilding(true)}
-          className="inline-flex items-center gap-1.5 justify-center w-full px-3 py-1.5 rounded text-xs font-medium bg-accent text-black hover:bg-[hsl(217,100%,75%)] transition-colors border border-transparent"
-        >
+        <PrimaryBtn onClick={() => setBuilding(true)} className="w-full">
           <Icon name="plus" size={14} /> New column
-        </button>
+        </PrimaryBtn>
       </div>
 
       <Modal

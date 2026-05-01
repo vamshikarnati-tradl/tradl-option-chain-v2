@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Header } from './components/Header';
 import { OptionChainTable } from './components/OptionChainTable';
 import { RulesPanel } from './components/RulesPanel';
@@ -7,17 +7,23 @@ import { HoverTooltip } from './components/HoverTooltip';
 import { CommandPalette } from './components/CommandPalette';
 import { useOptionChain } from './hooks/useOptionChain';
 import { useComputeEngine } from './hooks/useComputeEngine';
+import { useExpiries } from './hooks/useExpiries';
+import { useMouseTracking } from './hooks/useMouseTracking';
+import { usePaletteController } from './hooks/usePaletteController';
+import { useGlobalShortcut } from './hooks/useGlobalShortcut';
+import { usePrevSnapshot } from './hooks/usePrevSnapshot';
+import { useSessionBaseSpot } from './hooks/useSessionBaseSpot';
+import { usePersistedToggle } from './hooks/usePersistedToggle';
 import { loadColumns, loadRules, saveColumns, saveRules } from './core/persistence';
 import { indexColumnResults, indexRuleResults, type AppliedRule } from './core/result-index';
+import { STORAGE_KEYS } from './core/storage-keys';
 import type { CustomColumnDefinition, OptionChainRow, RuleDefinition } from './core/types';
 
-type Symbol = 'NIFTY' | 'BANKNIFTY' | 'FINNIFTY' | 'MIDCPNIFTY';
-
-interface ExpiryResp { symbol: string; expiries: string[] }
+const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'] as const;
+type SymbolName = typeof SYMBOLS[number];
 
 export function App() {
-  const [symbol, setSymbol] = useState<Symbol>('NIFTY');
-  const [expiries, setExpiries] = useState<string[]>([]);
+  const [symbol, setSymbol] = useState<SymbolName>('NIFTY');
   const [expiry, setExpiry] = useState<string>('');
 
   const [rules, setRules] = useState<RuleDefinition[]>(() => loadRules());
@@ -25,92 +31,35 @@ export function App() {
 
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [paletteAnchor, setPaletteAnchor] = useState<'cursor' | { x: number; y: number }>('cursor');
+  const [expanded, setExpanded] = usePersistedToggle(STORAGE_KEYS.expanded);
 
-  const PAL_W = 460;
-  const openPaletteAtCursor = () => { setPaletteAnchor('cursor'); setPaletteOpen(true); };
-  const openPaletteCentered = () => {
-    setPaletteAnchor({
-      x: Math.max(20, (window.innerWidth - PAL_W) / 2),
-      y: Math.max(60, window.innerHeight * 0.18),
-    });
-    setPaletteOpen(true);
-  };
-  const [expanded, setExpanded] = useState<boolean>(() => localStorage.getItem('tradl.expanded') === '1');
-  useEffect(() => { localStorage.setItem('tradl.expanded', expanded ? '1' : '0'); }, [expanded]);
+  const palette = usePaletteController();
+  const mouse = useMouseTracking();
+  useGlobalShortcut({ onSlash: palette.openAtCursor, onCmdK: palette.openCentered });
 
   const [hoverRow, setHoverRow] = useState<OptionChainRow | null>(null);
   const [hoverMatched, setHoverMatched] = useState<AppliedRule[] | null>(null);
-  const [hoverMouse, setHoverMouse] = useState<{ x: number; y: number } | null>(null);
 
   // Persist user changes
   useEffect(() => saveRules(rules), [rules]);
   useEffect(() => saveColumns(columns), [columns]);
 
-  // Mouse tracking for the hover tooltip
+  // Fetch expiries when symbol changes (TanStack Query handles caching + cancellation).
+  const { data: expiriesData } = useExpiries(symbol);
+  const expiries = expiriesData?.expiries ?? [];
   useEffect(() => {
-    const onMove = (e: MouseEvent) => setHoverMouse({ x: e.clientX, y: e.clientY });
-    window.addEventListener('mousemove', onMove);
-    return () => window.removeEventListener('mousemove', onMove);
-  }, []);
-
-  // Global shortcut: `/` opens at the cursor; Cmd+K opens centered (the
-  // conventional "command palette" feel). Skip while typing in fields.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const tag = target?.tagName;
-      const inField = tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable;
-      const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
-      const isSlash = e.key === '/' && !inField;
-      if (isCmdK) { e.preventDefault(); openPaletteCentered(); }
-      else if (isSlash) { e.preventDefault(); openPaletteAtCursor(); }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
-
-  // Fetch expiries when symbol changes
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/expiries/${symbol}`)
-      .then((r) => r.ok ? r.json() : Promise.reject(r.statusText))
-      .then((j: ExpiryResp) => {
-        if (cancelled) return;
-        setExpiries(j.expiries);
-        if (!j.expiries.includes(expiry)) setExpiry(j.expiries[0] ?? '');
-      })
-      .catch(() => { /* silent — header just shows current expiry */ });
-    return () => { cancelled = true; };
+    if (!expiries.length) return;
+    if (!expiries.includes(expiry)) setExpiry(expiries[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [symbol]);
+  }, [expiries]);
 
   const data = useOptionChain(symbol);
   const compute = useComputeEngine(data.rows, rules, columns);
 
-  // Track previous-snapshot rows by strike so FlashCell can compare values.
-  const prevRowsByStrikeRef = useRef<Map<number, OptionChainRow>>(new Map());
-  const lastSnapshotIdRef = useRef<number>(-1);
-  if (data.snapshotCount !== lastSnapshotIdRef.current) {
-    lastSnapshotIdRef.current = data.snapshotCount;
-    // Capture pre-update state on every new snapshot (rolled forward from prev render).
-  }
+  const prevSnapshot = usePrevSnapshot(data.rows);
+  const { spotChange, spotPct } = useSessionBaseSpot(data.underlyingValue);
 
-  // Roll prevRowsByStrikeRef forward each render: capture *current* rows so the
-  // next snapshot's render can compare against this one.
-  const prevSnapshot = prevRowsByStrikeRef.current;
-  const nextSnapshot = useMemo(() => {
-    const m = new Map<number, OptionChainRow>();
-    for (const r of data.rows) m.set(r.strikePrice, r);
-    return m;
-  }, [data.rows]);
-
-  useEffect(() => {
-    prevRowsByStrikeRef.current = nextSnapshot;
-  }, [nextSnapshot]);
-
-  // Sync expiry in header to whatever the data store knows (it follows the most recent snapshot)
+  // Sync expiry in header to whatever the data store knows (it follows the most recent snapshot).
   useEffect(() => {
     if (data.expiryDate && !expiry) setExpiry(data.expiryDate);
   }, [data.expiryDate, expiry]);
@@ -134,15 +83,6 @@ export function App() {
     [data.rows],
   );
 
-  // Spot change vs the first snapshot we saw — gives a session-relative delta.
-  const sessionBaseSpotRef = useRef<number | null>(null);
-  if (sessionBaseSpotRef.current == null && data.underlyingValue > 0) {
-    sessionBaseSpotRef.current = data.underlyingValue;
-  }
-  const baseSpot = sessionBaseSpotRef.current ?? data.underlyingValue ?? 1;
-  const spotChange = data.underlyingValue - baseSpot;
-  const spotPct = baseSpot ? (spotChange / baseSpot) * 100 : 0;
-
   const sampleRow = data.rows.length ? data.rows[Math.floor(data.rows.length / 2)] : undefined;
   const enabledRulesCount = rules.filter((r) => r.enabled).length;
 
@@ -150,7 +90,8 @@ export function App() {
     <div className="flex flex-col h-screen relative">
       <Header
         symbol={symbol}
-        setSymbol={(s) => setSymbol(s as Symbol)}
+        symbols={SYMBOLS}
+        setSymbol={setSymbol}
         expiry={expiry || data.expiryDate || '—'}
         setExpiry={setExpiry}
         expiries={expiries}
@@ -170,14 +111,14 @@ export function App() {
         panelOpen={rulesOpen || columnsOpen}
         expanded={expanded}
         onToggleExpanded={() => setExpanded((v) => !v)}
-        onAsk={openPaletteCentered}
+        onAsk={palette.openCentered}
       />
 
       <main className={`flex-1 overflow-auto bg-bg-0 transition-[padding] duration-300 ${
         rulesOpen || columnsOpen ? 'pr-[380px]' : ''
       }`}>
         {data.error && (
-          <div className="mx-3 mt-3 p-2 rounded border border-[hsla(0,60%,30%,0.6)] bg-[hsla(0,60%,30%,0.2)] text-neg text-sm">
+          <div className="mx-3 mt-3 p-2 rounded border border-pill-neg-border bg-pill-neg text-neg text-sm">
             {data.error}
           </div>
         )}
@@ -212,18 +153,18 @@ export function App() {
         onChange={setColumns}
       />
 
-      {hoverRow && !paletteOpen && (
-        <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={hoverMouse} />
+      {hoverRow && !palette.open && (
+        <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={mouse} />
       )}
 
       <CommandPalette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
+        open={palette.open}
+        onClose={palette.close}
         rules={rules}
         columns={columns}
         rows={data.rows}
-        mouse={hoverMouse}
-        anchor={paletteAnchor}
+        mouse={mouse}
+        anchor={palette.anchor}
         onApplyRule={(rule) => setRules((rs) => [...rs, rule])}
         onApplyColumn={(col) => setColumns((cs) => [...cs, col])}
       />

@@ -4,11 +4,12 @@
 // Expanded adds Call Vol · Call IV on the left, Put IV · Put Vol on the right.
 // OI/LTP cells are "stacked": value on top, percent change below.
 
-import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useMemo, useRef } from 'react';
 import type { CustomColumnDefinition, OptionChainRow } from '../core/types';
 import { type AppliedRule, type ColumnIndex, type RuleHighlight, bgForScope } from '../core/result-index';
 import { ruleHsl } from '../core/palette';
 import { fmtChange, fmtInt, fmtNum, fmtPct } from '../utils/format';
+import { useFlash } from '../hooks/useFlash';
 
 interface Props {
   rows: OptionChainRow[];
@@ -48,20 +49,7 @@ interface FlashSpanProps {
 
 // Inline-block span with a brief flash background when value changes.
 function FlashSpan({ value, prevValue, display, className }: FlashSpanProps) {
-  const [flash, setFlash] = useState<'flash-up' | 'flash-dn' | ''>('');
-  useEffect(() => {
-    if (
-      prevValue !== undefined &&
-      typeof value === 'number' &&
-      typeof prevValue === 'number' &&
-      value !== prevValue
-    ) {
-      const dir = value > prevValue ? 'flash-up' : 'flash-dn';
-      setFlash(dir);
-      const t = setTimeout(() => setFlash(''), 700);
-      return () => clearTimeout(t);
-    }
-  }, [value, prevValue]);
+  const flash = useFlash(value, prevValue);
   return (
     <span
       className={`tnum ${flash} ${className ?? ''}`}

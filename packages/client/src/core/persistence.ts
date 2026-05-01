@@ -1,9 +1,10 @@
 import type { CustomColumnDefinition, RuleDefinition } from './types';
 import { PREDEFINED_COLUMNS, PREDEFINED_RULES } from './predefined';
 import { hueFromHex, PALETTE_HUES } from './palette';
+import { STORAGE_KEYS } from './storage-keys';
 
-const RULES_KEY = 'tradl.rules.v1';
-const COLUMNS_KEY = 'tradl.columns.v1';
+const RULES_KEY = STORAGE_KEYS.rules;
+const COLUMNS_KEY = STORAGE_KEYS.columns;
 
 const PREDEFINED_BY_ID = new Map(PREDEFINED_RULES.map((r) => [r.id, r]));
 
