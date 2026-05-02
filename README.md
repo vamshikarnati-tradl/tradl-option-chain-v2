@@ -130,12 +130,9 @@ Production bundle: ~270 KB JS, ~82 KB gzipped.
 
 ---
 
-## Roadmap
+## What more can we do
 
-- **Benchmark with 50+ rules / 10+ columns** to validate the < 5ms-per-tick worker target
-- **Virtual scrolling** — fine for NIFTY's ~40 strikes, but a full equity chain would need it
 - **Multi-symbol view** — split-screen comparison (e.g. NIFTY + BANKNIFTY side by side)
 - **Historical sparklines per cell** — a small inline chart for OI / LTP over the last N ticks
-- **Visual rule builder** — drag-and-drop conditions, presets that fork into custom rules
-- **Real NSE without a proxy** — currently blocked by Akamai bot protection; would need a residential proxy or a headless-browser scraper in `nse-fetcher.ts`
 - **Sharing** — export a rule + column set as JSON and import into another session
+- **Ghost columns** - view in real time as you build a column
