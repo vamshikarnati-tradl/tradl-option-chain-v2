@@ -254,7 +254,7 @@ export function ColumnsPanel({ open, onClose, columns, columnErrors, sampleRow, 
   };
 
   return (
-    <aside className={`fixed top-0 right-0 bottom-0 w-[380px] bg-bg-1 border-l border-line flex flex-col z-50 shadow-[-8px_0_24px_rgba(0,0,0,0.4)] transition-transform duration-300 ${
+    <aside className={`fixed top-0 right-0 bottom-0 w-full sm:w-[380px] bg-bg-1 border-l border-line flex flex-col z-50 shadow-[-8px_0_24px_rgba(0,0,0,0.4)] transition-transform duration-300 ${
       open ? 'translate-x-0' : 'translate-x-full'
     }`}>
       <div className="flex items-center justify-between h-12 pl-4 pr-3 border-b border-line shrink-0">

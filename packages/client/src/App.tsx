@@ -5,6 +5,7 @@ import { RulesPanel } from './components/RulesPanel';
 import { ColumnsPanel } from './components/ColumnsPanel';
 import { HoverTooltip } from './components/HoverTooltip';
 import { CommandPalette } from './components/CommandPalette';
+import { BottomBar } from './components/BottomBar';
 import { useOptionChain } from './hooks/useOptionChain';
 import { useComputeEngine } from './hooks/useComputeEngine';
 import { useExpiries } from './hooks/useExpiries';
@@ -14,6 +15,7 @@ import { useGlobalShortcut } from './hooks/useGlobalShortcut';
 import { usePrevSnapshot } from './hooks/usePrevSnapshot';
 import { useSessionBaseSpot } from './hooks/useSessionBaseSpot';
 import { usePersistedToggle } from './hooks/usePersistedToggle';
+import { useIsTablet } from './hooks/useMediaQuery';
 import { loadColumns, loadRules, saveColumns, saveRules } from './core/persistence';
 import { indexColumnResults, indexRuleResults, type AppliedRule } from './core/result-index';
 import { STORAGE_KEYS } from './core/storage-keys';
@@ -32,6 +34,11 @@ export function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [expanded, setExpanded] = usePersistedToggle(STORAGE_KEYS.expanded);
+  // Below `md` we force the table into compact mode regardless of the
+  // persisted toggle — Vol/IV columns make it overflow horizontally and
+  // the toggle itself is hidden in the header anyway.
+  const isTablet = useIsTablet();
+  const tableExpanded = expanded && !isTablet;
 
   const palette = usePaletteController();
   const mouse = useMouseTracking();
@@ -115,7 +122,7 @@ export function App() {
       />
 
       <main className={`flex-1 overflow-auto bg-bg-0 transition-[padding] duration-300 ${
-        rulesOpen || columnsOpen ? 'pr-[380px]' : ''
+        rulesOpen || columnsOpen ? 'sm:pr-[380px]' : ''
       }`}>
         {data.error && (
           <div className="mx-3 mt-3 p-2 rounded border border-pill-neg-border bg-pill-neg text-neg text-sm">
@@ -127,13 +134,24 @@ export function App() {
           prevRowsByStrike={prevSnapshot}
           highlights={highlights}
           columnIndex={columnIndex}
-          expanded={expanded}
+          expanded={tableExpanded}
+          scrollResetKey={symbol}
           onRowHover={(row, matched) => {
             setHoverRow(row);
             setHoverMatched(matched);
           }}
         />
       </main>
+
+      <BottomBar
+        ruleCount={enabledRulesCount}
+        columnCount={columns.length}
+        rulesOpen={rulesOpen}
+        columnsOpen={columnsOpen}
+        onAsk={palette.openCentered}
+        onToggleRules={() => { setRulesOpen((o) => !o); setColumnsOpen(false); }}
+        onToggleColumns={() => { setColumnsOpen((o) => !o); setRulesOpen(false); }}
+      />
 
       <RulesPanel
         open={rulesOpen}

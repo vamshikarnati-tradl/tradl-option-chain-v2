@@ -45,6 +45,29 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  // Keep the sheet mounted briefly after `open` flips false so the slide-down
+  // exit animation can play. `entered` controls the transform/opacity classes
+  // for the enter and exit transitions on mobile (and a soft fade on desktop).
+  const [shouldRender, setShouldRender] = useState(open);
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    if (open) {
+      setShouldRender(true);
+      // Double RAF — single RAF can fire before the browser paints the
+      // initial `translate-y-full` state, so the transition would have
+      // nothing to animate from. RAF1 ensures the initial paint happens;
+      // RAF2 then flips `entered=true` so the transition kicks in cleanly.
+      let raf2 = 0;
+      const raf1 = requestAnimationFrame(() => {
+        raf2 = requestAnimationFrame(() => setEntered(true));
+      });
+      return () => { cancelAnimationFrame(raf1); cancelAnimationFrame(raf2); };
+    }
+    setEntered(false);
+    const t = window.setTimeout(() => setShouldRender(false), 220);
+    return () => window.clearTimeout(t);
+  }, [open]);
+
   const parse = useAiParse();
   const status: Status =
     parse.isPending ? 'parsing' :
@@ -153,22 +176,45 @@ export function CommandPalette({
       : input.trim() ? 'parse'
       : '—';
 
-  if (!open) return null;
+  if (!shouldRender) return null;
 
-  return (
-    <div
-      ref={rootRef}
-      style={{
+  const wrapStyle: React.CSSProperties = position.isMobile
+    ? { paddingBottom: 'env(safe-area-inset-bottom)' }
+    : {
         left: position.left,
         top: position.top,
         width: PAL_W,
         maxHeight: '72vh',
         transition: position.frozen ? 'none' : 'left 80ms ease-out, top 80ms ease-out',
-      }}
-      className="fixed z-[2000] bg-bg-1 border border-line-2 rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col"
+      };
+  // Mobile: bottom-anchored sheet — slides up from where the BottomBar's Ask
+  // button sits, leaves a peek of the table at the top, top corners rounded.
+  // Desktop: free-floating panel anchored at cursor or pinned coordinate;
+  // gets a soft fade so it doesn't snap into existence at the cursor.
+  const wrapClass = position.isMobile
+    ? `fixed z-[2000] left-0 right-0 bottom-0 max-h-[85vh] bg-bg-1 border-t border-x border-line-2 rounded-t-xl shadow-[0_-12px_48px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col transition-transform duration-200 ease-out ${entered ? 'translate-y-0' : 'translate-y-full'}`
+    : `fixed z-[2000] bg-bg-1 border border-line-2 rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col transition-opacity duration-150 ${entered ? 'opacity-100' : 'opacity-0'}`;
+
+  return (
+    <>
+      {position.isMobile && (
+        <div
+          className={`fixed inset-0 z-[1999] bg-black/55 backdrop-blur-sm transition-opacity duration-200 ${entered ? 'opacity-100' : 'opacity-0'}`}
+          onMouseDown={onClose}
+        />
+      )}
+    <div
+      ref={rootRef}
+      style={wrapStyle}
+      className={wrapClass}
       onMouseEnter={position.freezeAtCurrentRect}
       onMouseDown={(e) => e.stopPropagation()}
     >
+      {position.isMobile && (
+        <div className="flex justify-center pt-2 pb-1 shrink-0" onClick={onClose}>
+          <span className="block w-10 h-1 rounded-full bg-line-2" />
+        </div>
+      )}
       {/* Input row */}
       <div className="flex items-center gap-2.5 px-4 h-[52px] border-b border-line shrink-0">
         <span className="text-accent text-base leading-none">✦</span>
@@ -181,7 +227,7 @@ export function CommandPalette({
           className="flex-1 bg-transparent border-0 outline-none focus:outline-none focus:ring-0 text-ink text-[14px] placeholder:text-ink-3"
         />
         {status === 'parsing' && <ParsingDots />}
-        <Kbd>esc</Kbd>
+        <Kbd className="hidden md:inline-block">esc</Kbd>
       </div>
 
       {/* Body — scrollable middle */}
@@ -223,7 +269,8 @@ export function CommandPalette({
 
       {/* Footer */}
       <div className="flex items-center justify-between px-4 h-9 border-t border-line bg-bg-1 shrink-0">
-        <div className="flex items-center gap-3 font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">
+        {/* Keyboard shortcuts — desktop only (mobile has no esc/cmd keys) */}
+        <div className="hidden md:flex items-center gap-3 font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">
           <span className="inline-flex items-center gap-1">
             <Kbd size="xs">↵</Kbd> {applyLabel}
           </span>
@@ -231,12 +278,13 @@ export function CommandPalette({
             <Kbd size="xs">esc</Kbd> close
           </span>
         </div>
-        <div className="font-mono text-[10px] text-ink-4 inline-flex items-center gap-1.5">
+        <div className="font-mono text-[10px] text-ink-4 inline-flex items-center gap-1.5 ml-auto">
           <span className="text-accent">✦</span>
           <span>haiku · structured</span>
         </div>
       </div>
     </div>
+    </>
   );
 }
 

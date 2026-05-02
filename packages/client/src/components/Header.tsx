@@ -64,58 +64,67 @@ export function Header<S extends string>({
   const [theme, setTheme] = useTheme();
   const next: Theme = NEXT_THEME[theme];
   return (
-    <header className={`flex items-center justify-between h-12 pl-3.5 ${panelOpen ? 'pr-[394px]' : 'pr-3.5'} gap-4 bg-bg-1 border-b border-line flex-shrink-0 transition-[padding] duration-300`}>
-      <div className="flex items-center gap-3">
-        <div className="flex items-baseline gap-1.5 mr-1">
+    <header className={`flex items-center justify-between h-12 pl-2 sm:pl-3.5 ${panelOpen ? 'pr-2 sm:pr-[394px]' : 'pr-2 sm:pr-3.5'} gap-1 sm:gap-4 bg-bg-1 border-b border-line flex-shrink-0 transition-[padding] duration-300`}>
+      {/* Brand + symbol/expiry */}
+      <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+        <div className="hidden md:flex items-baseline gap-1.5 mr-1 shrink-0">
           <span className="text-accent text-base leading-none">▰</span>
-          <span className="font-mono text-[12.5px] tracking-[-0.01em] font-semibold">
+          <span className="font-mono text-[12.5px] tracking-[-0.01em] font-semibold whitespace-nowrap">
             <span className="font-mono">tradl</span>
             <span className="text-ink-3 font-normal">/option-chain</span>
           </span>
         </div>
-        <Dropdown value={symbol} options={symbols} onChange={setSymbol} width={120} />
-        <Dropdown value={expiry} options={expiries.length ? expiries : [expiry]} onChange={setExpiry} label="exp" width={150} />
+        {/* Mobile-only mark */}
+        <span className="md:hidden text-accent text-base leading-none shrink-0">▰</span>
+        <Dropdown value={symbol} options={symbols} onChange={setSymbol} width={120} mobileWidth={86} />
+        <Dropdown value={expiry} options={expiries.length ? expiries : [expiry]} onChange={setExpiry} label="exp" width={150} mobileWidth={104} hideLabelOnMobile />
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="flex items-baseline gap-2">
-          <span className="font-mono text-[10.5px] text-ink-3 uppercase tracking-[0.08em]">spot</span>
-          <span className="font-mono text-base font-semibold tnum tracking-[-0.01em]">{fmtNum(spot)}</span>
-          <span className={`font-mono text-xs tnum ${spotChange >= 0 ? 'text-pos' : 'text-neg'}`}>
-            {fmtChange(spotChange)} <span className="opacity-75 text-[11px]">({fmtChange(spotPct)}%)</span>
+      {/* Spot + vol/oi (vol/oi hidden until xl, vol+oi labels hidden until sm).
+          Spot block can shrink so chrome buttons stay on screen. */}
+      <div className="flex items-center gap-3 sm:gap-6 min-w-0 shrink">
+        <div className="flex items-baseline gap-1 sm:gap-2 min-w-0">
+          <span className="hidden sm:inline font-mono text-[10.5px] text-ink-3 uppercase tracking-[0.08em]">spot</span>
+          <span className="font-mono text-sm sm:text-base font-semibold tnum tracking-[-0.01em] truncate">{fmtNum(spot)}</span>
+          <span className={`font-mono text-[11px] sm:text-xs tnum truncate ${spotChange >= 0 ? 'text-pos' : 'text-neg'}`}>
+            <span className="hidden sm:inline">{fmtChange(spotChange)} </span>
+            <span className="opacity-90 sm:opacity-75 text-[10.5px] sm:text-[11px]">({fmtChange(spotPct)}%)</span>
           </span>
         </div>
-        <div className="flex items-baseline gap-1.5">
+        <div className="hidden xl:flex items-baseline gap-1.5">
           <span className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">vol</span>
           <span className="font-mono text-xs tnum text-ink-2">{fmtCompact(totalVolume)}</span>
         </div>
-        <div className="flex items-baseline gap-1.5">
+        <div className="hidden xl:flex items-baseline gap-1.5">
           <span className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">oi</span>
           <span className="font-mono text-xs tnum text-ink-2">{fmtCompact(totalOI)}</span>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <ConnectionDot connected={connected} lastUpdate={lastUpdate} />
-        <ToolbarButton onClick={onAsk} title="Ask AI to add a rule or column">
+      {/* Right: actions */}
+      <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+        <div className="hidden md:flex"><ConnectionDot connected={connected} lastUpdate={lastUpdate} /></div>
+        {/* Mobile-only: just a pulsing dot */}
+        <span className={`md:hidden w-[7px] h-[7px] rounded-full ${connected ? 'bg-pos animate-pulse-soft' : 'bg-neg'}`} />
+        <ToolbarButton onClick={onAsk} title="Ask AI to add a rule or column" className="hidden md:inline-flex">
           <span className="text-accent leading-none">✦</span>
           <span>Ask</span>
           <Kbd>/</Kbd>
         </ToolbarButton>
-        <ToolbarButton active={rulesOpen} onClick={onToggleRules}>
+        <ToolbarButton active={rulesOpen} onClick={onToggleRules} className="hidden md:inline-flex">
           <Icon name="bolt" size={14} />
-          <span>Rules</span>
+          <span className="hidden sm:inline">Rules</span>
           <CountBadge active={rulesOpen}>{ruleCount}</CountBadge>
         </ToolbarButton>
-        <ToolbarButton active={columnsOpen} onClick={onToggleColumns}>
+        <ToolbarButton active={columnsOpen} onClick={onToggleColumns} className="hidden md:inline-flex">
           <Icon name="columns" size={14} />
-          <span>Columns</span>
+          <span className="hidden sm:inline">Columns</span>
           <CountBadge active={columnsOpen}>{columnCount}</CountBadge>
         </ToolbarButton>
         <button
           title={`Theme: ${THEME_LABELS[theme]} — click for ${THEME_LABELS[next]}`}
           onClick={() => setTheme(next)}
-          className="inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
+          className="hidden md:inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
         >
           <ThemeIcon theme={theme} />
           <span className="font-mono text-[10px] uppercase tracking-[0.06em]">{THEME_LABELS[theme]}</span>
@@ -124,7 +133,7 @@ export function Header<S extends string>({
         <button
           title={expanded ? 'Hide Vol & IV columns' : 'Show Vol & IV columns'}
           onClick={onToggleExpanded}
-          className={`inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] font-medium transition-colors border ${
+          className={`hidden md:inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-[11px] font-medium transition-colors border ${
             expanded
               ? 'bg-bg-3 text-ink border-line-2'
               : 'bg-transparent text-ink-3 border-transparent hover:bg-bg-2 hover:text-ink'
@@ -141,13 +150,13 @@ export function Header<S extends string>({
         </button>
         <button
           title="Settings"
-          className="w-7 h-7 rounded-md flex items-center justify-center text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
+          className="hidden md:flex w-7 h-7 rounded-md items-center justify-center text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
         >
           <Icon name="settings" size={15} />
         </button>
         <button
           title="Account"
-          className="w-7 h-7 rounded-md flex items-center justify-center font-mono text-[11px] font-semibold bg-bg-3 text-ink border border-line-2"
+          className="hidden md:flex w-7 h-7 rounded-md items-center justify-center font-mono text-[11px] font-semibold bg-bg-3 text-ink border border-line-2"
         >
           A
         </button>

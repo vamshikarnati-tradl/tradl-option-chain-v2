@@ -70,7 +70,7 @@ export function RulePreview({ result, rows, onApply, onEditJson, onRephrase }: P
         {isLow && <GhostBtn onClick={onRephrase}>Rephrase</GhostBtn>}
         <GhostBtn onClick={onEditJson}>{'</> Edit JSON'}</GhostBtn>
         <PrimaryBtn onClick={onApply}>
-          ✓ Apply rule <Kbd size="xs">↵</Kbd>
+          ✓ Apply rule <Kbd size="xs" className="hidden md:inline-block">↵</Kbd>
         </PrimaryBtn>
       </div>
     </div>

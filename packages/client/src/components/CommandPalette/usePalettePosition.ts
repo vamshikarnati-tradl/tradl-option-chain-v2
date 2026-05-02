@@ -1,4 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react';
+import { useIsMobile } from '../../hooks/useMediaQuery';
 import { PAL_H_EST, PAL_MARGIN, PAL_W } from './types';
 
 interface Args {
@@ -11,19 +12,25 @@ interface Args {
 }
 
 interface Result {
+  /** True when the palette should render as a top-anchored full-width sheet. */
+  isMobile: boolean;
+  /** Cursor mode only — desktop's pinned x/y. Ignored when `isMobile`. */
   left: number;
   top: number;
+  /** Cursor mode only — disable the ease transition once locked. */
   frozen: boolean;
   /** Call from onMouseEnter — locks position when the user hovers in. */
   freezeAtCurrentRect: () => void;
 }
 
-// Owns the cursor-follow / freeze-and-pin position state. Two modes:
-// - anchor='cursor' starts free (eases with the mouse), locks once the user
-//   types or pointer-enters the panel.
-// - anchor={x,y} starts already locked at the supplied coordinate (Ask
-//   button + Cmd+K — feels like a centered modal).
+// Owns the cursor-follow / freeze-and-pin position state. Three modes:
+// - mobile (< sm): rendered as a top sheet with backdrop. No anchoring math.
+// - desktop, anchor='cursor': starts free (eases with the mouse), locks
+//   once the user types or pointer-enters the panel.
+// - desktop, anchor={x,y}: starts already locked at the supplied coordinate
+//   (Ask button + Cmd+K — feels like a centered modal).
 export function usePalettePosition({ open, anchor, mouse, rootRef, inputLength }: Args): Result {
+  const isMobile = useIsMobile();
   const [frozen, setFrozen] = useState(false);
   const [frozenPos, setFrozenPos] = useState<{ x: number; y: number } | null>(null);
 
@@ -48,23 +55,26 @@ export function usePalettePosition({ open, anchor, mouse, rootRef, inputLength }
     }
   }, [open, inputLength, frozen, rootRef]);
 
-  let left: number;
-  let top: number;
-  if (frozen && frozenPos) {
-    left = frozenPos.x;
-    top = frozenPos.y;
-  } else {
-    const ax = mouse?.x ?? window.innerWidth / 2;
-    const ay = mouse?.y ?? window.innerHeight / 3;
-    left = ax + 16;
-    if (left + PAL_W + PAL_MARGIN > window.innerWidth) left = Math.max(PAL_MARGIN, ax - 16 - PAL_W);
-    top = ay + 12;
-    if (top + PAL_H_EST + PAL_MARGIN > window.innerHeight) {
-      top = Math.max(PAL_MARGIN, window.innerHeight - PAL_H_EST - PAL_MARGIN);
+  let left = 0;
+  let top = 0;
+  if (!isMobile) {
+    if (frozen && frozenPos) {
+      left = frozenPos.x;
+      top = frozenPos.y;
+    } else {
+      const ax = mouse?.x ?? window.innerWidth / 2;
+      const ay = mouse?.y ?? window.innerHeight / 3;
+      left = ax + 16;
+      if (left + PAL_W + PAL_MARGIN > window.innerWidth) left = Math.max(PAL_MARGIN, ax - 16 - PAL_W);
+      top = ay + 12;
+      if (top + PAL_H_EST + PAL_MARGIN > window.innerHeight) {
+        top = Math.max(PAL_MARGIN, window.innerHeight - PAL_H_EST - PAL_MARGIN);
+      }
     }
   }
 
   const freezeAtCurrentRect = () => {
+    if (isMobile) return;
     if (!frozen && rootRef.current) {
       const r = rootRef.current.getBoundingClientRect();
       setFrozenPos({ x: r.left, y: r.top });
@@ -72,5 +82,5 @@ export function usePalettePosition({ open, anchor, mouse, rootRef, inputLength }
     }
   };
 
-  return { left, top, frozen, freezeAtCurrentRect };
+  return { isMobile, left, top, frozen, freezeAtCurrentRect };
 }

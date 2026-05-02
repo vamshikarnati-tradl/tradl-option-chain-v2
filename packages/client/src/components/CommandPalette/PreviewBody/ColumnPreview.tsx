@@ -72,7 +72,7 @@ export function ColumnPreview({ result, rows, onApply, onEditJson, onRephrase }:
         {isLow && <GhostBtn onClick={onRephrase}>Rephrase</GhostBtn>}
         <GhostBtn onClick={onEditJson}>{'</> Edit JSON'}</GhostBtn>
         <PrimaryBtn onClick={onApply}>
-          ✓ Add column <Kbd size="xs">↵</Kbd>
+          ✓ Add column <Kbd size="xs" className="hidden md:inline-block">↵</Kbd>
         </PrimaryBtn>
       </div>
     </div>

@@ -4,7 +4,7 @@
 // Expanded adds Call Vol · Call IV on the left, Put IV · Put Vol on the right.
 // OI/LTP cells are "stacked": value on top, percent change below.
 
-import { Fragment, memo, useMemo, useRef } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef } from 'react';
 import type { CustomColumnDefinition, OptionChainRow } from '../core/types';
 import { type AppliedRule, type ColumnIndex, type RuleHighlight, bgForScope } from '../core/result-index';
 import { ruleHsl } from '../core/palette';
@@ -18,6 +18,12 @@ interface Props {
   columnIndex: ColumnIndex;
   expanded?: boolean;
   onRowHover?: (row: OptionChainRow | null, matched: AppliedRule[] | null) => void;
+  /**
+   * When this value changes, the table re-centers on the spot row on the
+   * next data render. Pass `symbol` (or anything else that should re-trigger
+   * the initial center-scroll behavior).
+   */
+  scrollResetKey?: string;
 }
 
 type ExtraCol = { key: keyof OptionChainRow; label: string; kind: 'int' | 'num' };
@@ -138,9 +144,11 @@ function StrikeCell({ row, isATM, applied }: {
   if (isPutITM) { markerColor = 'bg-neg/70'; markerWidth = 18; }
 
   return (
-    <td className="px-3 py-2.5 text-center tnum strike-cell">
+    <td className="px-1.5 sm:px-3 py-2.5 text-center tnum strike-cell">
       <div className="leading-tight">
-        <div className={isATM ? 'text-[14px] font-semibold text-ink' : 'text-[13px] text-ink-2'}>
+        <div className={isATM
+          ? 'text-[13px] sm:text-[14px] font-semibold text-ink'
+          : 'text-[12px] sm:text-[13px] text-ink-2'}>
           {fmtInt(row.strikePrice)}
         </div>
         <div className="flex items-center justify-center gap-px mt-1 h-[2px]">
@@ -181,7 +189,7 @@ const StrikeRow = memo(function StrikeRow({
 
   const cellsByCol = new Map(cells.map((c) => [c.def.id, c]));
 
-  const cellBase = 'px-3 py-2.5 text-right tnum whitespace-nowrap relative align-middle';
+  const cellBase = 'px-1.5 sm:px-3 py-2.5 text-right tnum whitespace-nowrap relative align-middle';
   const callItm = isCallITM ? ' itm-call' : '';
   const putItm = isPutITM ? ' itm-put' : '';
 
@@ -270,8 +278,11 @@ const StrikeRow = memo(function StrikeRow({
 
 // ─────────── Spot divider row ───────────
 
-function SpotDivider({ spot, baseSpot, totalCols }: {
-  spot: number; baseSpot: number; totalCols: number;
+function SpotDivider({ spot, baseSpot, totalCols, rowRef }: {
+  spot: number;
+  baseSpot: number;
+  totalCols: number;
+  rowRef?: React.Ref<HTMLTableRowElement>;
 }) {
   const change = spot - baseSpot;
   const pct = baseSpot ? (change / baseSpot) * 100 : 0;
@@ -279,18 +290,38 @@ function SpotDivider({ spot, baseSpot, totalCols }: {
     change > 0 ? 'text-pos border-pos/50' :
     change < 0 ? 'text-neg border-neg/50' :
     'text-ink border-line-2';
+  // Sticky on both edges so the spot pill stays visible regardless of scroll
+  // direction: clamps below the column header (top-9) when scrolled down past
+  // it, and at the bottom of main (bottom-0) when scrolled up past it. Main
+  // sits in a flex column above the BottomBar, so `bottom-0` lands flush
+  // above the bar with no gap. Background must be opaque or the rows behind
+  // would show through during sticky.
   return (
-    <tr className="spot-row">
+    <tr
+      ref={rowRef}
+      className="spot-row sticky top-9 bottom-0 z-[4] bg-bg-0"
+    >
       <td colSpan={totalCols} className="relative p-0">
-        <div className="relative border-t border-b border-line-2 bg-bg-1/40">
-          <div className={`absolute left-1/2 -translate-x-1/2 -translate-y-1/2 top-1/2 inline-flex items-center gap-2 px-3 py-1 rounded-full bg-bg-2 border ${tone}`}>
-            <span className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">spot</span>
-            <span className="font-semibold text-[13px] tnum">{fmtNum(spot, 2)}</span>
-            <span className={`tnum text-[11px] ${change > 0 ? 'text-pos' : change < 0 ? 'text-neg' : 'text-ink-3'}`}>
-              {fmtChange(change)} ({pct > 0 ? '+' : ''}{pct.toFixed(2)}%)
-            </span>
+        <div className="relative border-t border-b border-line-2 bg-bg-1/40 h-7 flex items-center">
+          {/*
+            Horizontal sticky wrapper. The td spans the full table width
+            (which can be > viewport when expanded or with custom columns).
+            `position: sticky; left: 0; width: 100vw` pins this wrapper to
+            the viewport's left edge with viewport width, so the pill inside
+            stays centered in the viewport regardless of horizontal scroll.
+          */}
+          <div
+            style={{ position: 'sticky', left: 0, width: '100vw' }}
+            className="flex justify-center"
+          >
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full bg-bg-2 border ${tone}`}>
+              <span className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">spot</span>
+              <span className="font-semibold text-[13px] tnum">{fmtNum(spot, 2)}</span>
+              <span className={`tnum text-[11px] ${change > 0 ? 'text-pos' : change < 0 ? 'text-neg' : 'text-ink-3'}`}>
+                {fmtChange(change)} ({pct > 0 ? '+' : ''}{pct.toFixed(2)}%)
+              </span>
+            </div>
           </div>
-          <div className="h-7" />
         </div>
       </td>
     </tr>
@@ -304,10 +335,10 @@ function ColHeader({ children, sub, align = 'right' }: {
 }) {
   const alignCls = align === 'center' ? 'text-center' : align === 'left' ? 'text-left' : 'text-right';
   return (
-    <th className={`px-3 py-2.5 font-medium text-[11px] text-ink-3 ${alignCls} th-clean whitespace-nowrap`}>
+    <th className={`px-1.5 sm:px-3 py-2 sm:py-2.5 font-medium text-[10px] sm:text-[11px] text-ink-3 ${alignCls} th-clean whitespace-nowrap`}>
       <div className="leading-tight">
         <div>{children}</div>
-        {sub && <div className="text-[9.5px] text-ink-4 mt-0.5 normal-case tracking-normal">{sub}</div>}
+        {sub && <div className="text-[9px] sm:text-[9.5px] text-ink-4 mt-0.5 normal-case tracking-normal">{sub}</div>}
       </div>
     </th>
   );
@@ -328,6 +359,7 @@ function findAtmStrike(rows: OptionChainRow[], spot: number): number | null {
 
 export function OptionChainTable({
   rows, prevRowsByStrike, highlights, columnIndex, expanded = false, onRowHover,
+  scrollResetKey,
 }: Props) {
   const spot = rows[0]?.underlyingValue ?? 0;
   const atm = useMemo(() => findAtmStrike(rows, spot), [rows, spot]);
@@ -337,6 +369,19 @@ export function OptionChainTable({
   // The spot divider goes between the last OTM and first ITM strike — i.e.
   // before the first row whose strike >= spot.
   const spotIdx = useMemo(() => rows.findIndex((r) => r.strikePrice >= spot), [rows, spot]);
+
+  // Scroll-to-center on first paint after data populates. Re-runs when
+  // `scrollResetKey` changes (symbol switch) so users land on the spot row
+  // without manual scrolling. Subsequent ticks don't re-scroll — `centeredRef`
+  // gates further calls.
+  const spotRowRef = useRef<HTMLTableRowElement | null>(null);
+  const centeredRef = useRef(false);
+  useEffect(() => { centeredRef.current = false; }, [scrollResetKey]);
+  useEffect(() => {
+    if (centeredRef.current || !rows.length || !spotRowRef.current) return;
+    spotRowRef.current.scrollIntoView({ block: 'center', behavior: 'auto' });
+    centeredRef.current = true;
+  }, [rows.length]);
 
   if (!rows.length) {
     return <div className="px-5 py-10 text-ink-3 text-sm">Waiting for first snapshot…</div>;
@@ -353,9 +398,11 @@ export function OptionChainTable({
 
   return (
     <div className="w-full">
-      <table className="w-full border-separate border-spacing-0 text-[12.5px] leading-none chain-table">
+      <table className="w-full border-separate border-spacing-0 text-[11px] sm:text-[12.5px] leading-none chain-table">
         <thead>
-          <tr className="sticky top-0 z-[5] bg-bg-0">
+          {/* h-9 matches the spot row's `top-9` sticky offset so the spot
+              clamps right below the column header without overlap. */}
+          <tr className="sticky top-0 z-[5] bg-bg-0 h-9">
             {expanded && EXTRA_CALL.map((c) => <ColHeader key={c.key}>{c.label}</ColHeader>)}
             <ColHeader sub="Δ %">Call OI</ColHeader>
             <ColHeader sub="Δ %">Call LTP</ColHeader>
@@ -374,7 +421,12 @@ export function OptionChainTable({
           {rows.map((row, i) => (
             <Fragment key={row.strikePrice}>
               {i === spotIdx && spotIdx > 0 && (
-                <SpotDivider spot={spot} baseSpot={baseSpotRef.current || spot} totalCols={totalCols} />
+                <SpotDivider
+                  spot={spot}
+                  baseSpot={baseSpotRef.current || spot}
+                  totalCols={totalCols}
+                  rowRef={spotRowRef}
+                />
               )}
               <StrikeRow
                 row={row}
