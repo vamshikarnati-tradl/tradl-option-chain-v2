@@ -1,25 +1,8 @@
-# tradl-option-chain
+# tradl / option-chain
 
-Live option chain demo with a client-side rule engine and custom column builder.
-See [PRD](./PRD.md) (or the conversation history) for the full design.
+Live NSE option chain with a client-side rule engine, custom column builder, and an AI command palette that turns plain English into engine-ready rules and columns.
 
-## Status — Pass A + Pass B complete
-
-End-to-end pipeline working:
-
-**Pass A:** backend → WebSocket → in-memory store → live React table with ATM highlighting and ITM shading.
-
-**Pass B:** Web Worker compute engine with field-level dependency tracking and per-cell memoization. 8 predefined rules (High Call/Put OI, IV Skew, Call OI Buildup/Unwinding, PCR Bullish/Bearish, Volume Spike) and 4 predefined custom columns (PCR, IV Spread, Straddle, Moneyness). Side panel for editing rules (field/expression LHS, operator, literal/field/expression RHS, AND/OR composition, scope = call/put/row, color picker) and custom columns (free-form expression with autocomplete-friendly syntax). All persisted to `localStorage`. Compute stats (durationMs / cache reuse) shown in the footer.
-
-## Project layout
-
-```
-packages/
-  server/   Express + ws server. Polls a data source, broadcasts snapshots.
-  client/   Vite + React + TS + Tailwind. WS client + table.
-```
-
-## Running
+## Run locally
 
 ```bash
 npm install
@@ -27,123 +10,132 @@ npm run dev:server   # http://localhost:4000
 npm run dev:client   # http://localhost:5173
 ```
 
-The Vite dev server proxies `/api/*` and `/ws/*` to the backend.
+The Vite dev server proxies `/api/*` and `/ws/*` to the backend. Open http://localhost:5173.
 
-### AI command palette (optional)
+### Optional: AI command palette
 
-Press `/` or `Cmd+K` anywhere in the app to open a natural-language command palette:
-
-```
-> highlight strikes where put OI is more than 3 times call OI
-> add a column for straddle price
-> moneyness as a percentage
-```
-
-Haiku 4.5 parses the input into a strict JSON rule or column definition (via Anthropic's structured outputs) which drops straight into the same engine the manual editor uses.
-
-To enable, set `ANTHROPIC_API_KEY` in `.env` at the repo root:
+Set `ANTHROPIC_API_KEY` in `.env` at the repo root to enable the natural-language palette (`/` or `Cmd+K`):
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Without the key, the rest of the app works fine — only the palette returns a 503. The key is read by the server (`tsx --env-file=../../.env`) and never leaves the backend; the client only sees the parsed JSON.
+Without the key, only the palette returns 503 — the rest of the app works.
 
-## Data source
-
-The backend supports two sources, selected by `DATA_SOURCE` env var:
-
-- **`mock`** (default) — generates a realistic Nifty-shaped chain (41 strikes around ATM, OI weighted by moneyness, IV smile, mean-reverting random-walk on spot, tick-to-tick LTP movement). Polls every 2s.
-- **`nse`** — fetches live (delayed) data from NSE. Polls every 60s.
+### Optional: live NSE feed
 
 ```bash
 DATA_SOURCE=nse npm run dev:server
 ```
 
-### Why mock is the default
+Defaults to a realistic mock generator (NSE's endpoint sits behind Akamai bot protection). Both sources produce identical row shapes, so the engine exercises the same code paths.
 
-NSE's option-chain endpoint is behind Akamai bot protection that returns `200 OK` with body `{}` for non-browser clients. Cookie warm-up via `/`, `/option-chain`, and `/api/marketStatus` succeeds, but the option-chain endpoint itself stays cached-empty (`x-cache: HIT`, `content-length: 2`). Reliably bypassing this typically requires a residential proxy or a headless browser — neither warranted for a compute-engine demo.
+---
 
-The mock generator produces data with the same shape and semantics as NSE, so the rule engine and expression evaluator (Pass B) will exercise identical code paths regardless of source. To work against live NSE, point the server at a residential proxy or replace `nse-fetcher.ts` with a Puppeteer/Playwright-based scraper.
+## What it is
 
-## Backend API
+Option-chain dashboards usually ship with a fixed set of derived metrics and highlight rules. If you want one the vendor didn't build (e.g. "highlight strikes where put OI dominance crosses 3× and call IV spikes above 16"), you wait, file a ticket, or export to Excel.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/health` | Liveness check + AI key presence |
-| GET | `/api/symbols` | Supported symbols |
-| GET | `/api/expiries/:symbol` | Available expiries |
-| GET | `/api/option-chain/:symbol?expiry=...` | One-shot snapshot |
-| WS  | `/ws/option-chain/:symbol` | Push snapshots on each poll |
-| POST | `/api/ai/parse` | Parse natural language → rule or column JSON (Haiku 4.5) |
+This project gives traders that authoring surface in the chain itself:
 
-Supported symbols: `NIFTY`, `BANKNIFTY`, `FINNIFTY`, `MIDCPNIFTY`.
+- **Rules** highlight strikes that match a condition. Define them in a side panel or by describing them in plain English.
+- **Columns** show derived calculations alongside the raw data — built from a safe expression language over the raw fields.
 
-## Architecture (Pass B)
+Everything runs against a live WebSocket feed and re-evaluates every tick, off the main thread.
+
+---
+
+## Highlights
+
+### 1. AI command palette
+
+Press `/` (cursor-anchored) or `Cmd+K` / the Ask button (centered) and describe what you want:
 
 ```
-DataStore (main thread)
-     │  rows
-     ▼
-ComputeBridge ───── postMessage ─────► Web Worker
-     │                                       │
-     │ result events                         │ ComputeEngine
-     ▼                                       │   ├─ compileRule (lhs/rhs → AST)
-useComputeEngine                             │   ├─ compileColumn (expr → AST)
-     │ ruleResults, columnResults            │   ├─ diff prevRows vs new
-     ▼                                       │   ├─ rule cache (skip if no dep changed)
-indexRuleResults / indexColumnResults        │   └─ cell cache (skip per-row if no dep changed)
-     │
-     ▼
-OptionChainTable (renders highlights + custom column cells)
+> highlight strikes where put OI is more than 3× call OI
+> add a column for straddle price
+> moneyness as a percentage
 ```
 
-Key files:
+Claude Haiku 4.5 with structured outputs parses the input into a strict JSON rule or column shape that drops straight into the same engine the side panel writes to. Low-confidence parses surface as a "best guess" warning with an inline JSON editor; ambiguous prompts ("put call ratio") return option chips so the user picks the intent. Recent prompts persist locally for one-tap re-use.
 
-- `core/expression-parser.ts` — recursive-descent parser, produces a typed AST. No `eval`.
-- `core/expression-evaluator.ts` — pure AST → number against an `OptionChainRow`.
-- `core/rule-engine.ts` — compiles a `RuleDefinition` into a closure pair (`evalLhs`, `evalRhs`) per condition; supports `field op literal`, `field op field`, and `expr op anything`.
-- `core/compute-engine.ts` — owns `prevRows`, rule cache, and per-cell column cache; tracks which fields changed each tick to short-circuit re-evaluation.
-- `workers/compute.worker.ts` — Web Worker entry point; receives `UPDATE_DATA` / `SET_RULES` / `SET_COLUMNS`, posts back `COMPUTE_RESULTS` with timing + cache hits.
-- `core/result-index.ts` — inverts rule/column result lists into per-strike maps for O(1) read in the table.
+### 2. Safe expression language
 
-## Deploying to Railway
+A custom recursive-descent parser produces a typed AST — no `eval`, no `Function()` constructor. Both the rule engine (LHS + RHS of every condition) and the custom column builder consume the same AST.
 
-The repo is configured for a **single Railway service** that serves both the API and the built client (no CORS, one URL, WebSocket on the same origin). [`railway.json`](./railway.json) at the root tells Railway how to build and deploy.
-
-### One-time setup
-
-1. Push the repo to GitHub (already done if you're reading this on GitHub).
-2. On [railway.com](https://railway.com): **New Project → Deploy from GitHub repo →** pick `vyapak1209/tradl-option-chain`.
-3. In the service's **Variables** tab, set:
-   - `ANTHROPIC_API_KEY` — required for the AI command palette (without it, only the palette returns a 503; everything else works)
-   - `DATA_SOURCE` — optional, `mock` (default) or `nse`
-   - `POLL_INTERVAL_MS` — optional override
-4. In the service's **Settings → Networking**, click **Generate Domain**.
-
-That's it. Railway will detect the `railway.json`, run `npm install && npm run build`, then `npm start`. The healthcheck hits `/api/health` so Railway knows when the service is ready.
-
-### Or via the CLI
-
-```bash
-brew install railway
-railway login
-railway link               # connect to the project
-railway up                 # deploy current branch
-railway variables --set ANTHROPIC_API_KEY=sk-ant-...
+```
++ - * / %     comparison > < >= <= == !=     logical && || !     ternary ?:
+abs min max round floor ceil sqrt pow log exp     constants PI E
+field references: call_oi, put_iv, strikePrice, ...
 ```
 
-### What the production server does differently
+### 3. Live rule engine with rich condition shapes
 
-- `node packages/server/dist/index.js` instead of `tsx watch` — compiled, no watcher
-- Serves [packages/client/dist](packages/client/dist) as static files, with an SPA fallback for non-`/api`, non-`/ws` paths
-- Reads env vars directly from the Railway environment (no `--env-file`)
-- WS connections come in on `wss://your-domain.up.railway.app/ws/option-chain/NIFTY`; the client picks the right protocol from `window.location`
+Every rule is a list of conditions composed with `AND` / `OR`. Each condition has:
 
-## What's next (Phase 3 of the PRD)
+- `lhs`: a single field (fast path) or a free expression
+- `operator`: `gt | gte | lt | lte | eq | neq | between`
+- `rhs`: a literal, another field, an expression, or a range
 
-- Benchmark with 50+ active rules and 10+ custom columns to validate the < 5ms / < 50ms targets
-- Virtual scrolling for the table (currently fine for Nifty's ~40 strikes, but would matter for full equity chains)
-- Visual rule builder (drag-and-drop conditions, presets/templates that fork)
-- Multi-symbol simultaneously
-- Historical sparklines per cell
+Plus a `scope` (`call | put | row` — controls which side of the row gets the color tint) and an HSL hue picked from a built-in palette so collisions stay readable. Eight predefined rules ship out of the box (High Call/Put OI, IV Skew, OI Buildup/Unwinding, PCR Bullish/Bearish, Volume Spike); user rules persist locally.
+
+### 4. Custom column builder
+
+Same expression language, separate surface. Type `(call_ltp + put_ltp)` and get a Straddle column; `abs(call_iv - put_iv)` for IV gap; `(strikePrice - underlyingValue) / underlyingValue * 100` for moneyness. The builder shows live syntax help, parses on every keystroke, and surfaces errors inline. Two presets ship by default (PCR, Straddle).
+
+### 5. Mobile-first responsive UI
+
+The chain is meant to be readable on a phone, not just a Bloomberg terminal:
+
+- Bottom action bar replaces header chrome on `< md` (Ask · Rules · Columns)
+- Command palette renders as a bottom sheet with slide-up animation on mobile, cursor-anchored on desktop
+- Spot row stays sticky at both top and bottom of the viewport while scrolling — and the spot pill itself uses a horizontal-sticky wrapper so it stays centered in the viewport even when the table is wider than the screen
+- On first load (and on symbol change) the table auto-scrolls to center the spot row
+- Side panels go full-width on mobile, 380px on desktop
+- 4 themes (Paper / Frost / Clean / Terminal) with semantic CSS tokens that override per theme
+
+### 6. Persistence + schema migration
+
+Rules, columns, theme, and layout preferences round-trip through `localStorage`. Old rule shapes (legacy `color: hex` styles) are migrated to the current `hue: number` shape on read so users don't lose data across releases.
+
+### 7. Single-service deploy
+
+One Railway service serves the Express API, the WebSocket endpoint, and the built React client from the same origin. No CORS dance, no second service for the frontend, WebSocket on the same hostname.
+
+---
+
+## Tech
+
+- **Frontend** — React 18 + TypeScript, Vite, Tailwind 3, TanStack Query (HTTP caching + mutation lifecycle), a Web Worker for compute, `createPortal` for modals
+- **Backend** — Node 20 + Express + `ws`, Anthropic SDK (`claude-haiku-4-5` via structured outputs)
+- **Monorepo** — npm workspaces (`packages/server`, `packages/client`)
+- **Deploy** — Railway via `railway.json`
+
+---
+
+## Performance
+
+Tick-to-paint is < 50ms with the predefined rule + column set on a typical laptop. Key choices:
+
+- **Web Worker compute.** All rule and column evaluation runs in `workers/compute.worker.ts`. The main thread only paints. Snapshots arrive over WebSocket → `ComputeBridge` posts to the worker → worker posts back result diffs.
+- **Field-level dependency tracking.** Each rule and each column declares which fields it reads (extracted from its AST). On every tick, the engine diffs the new row against the prev row to compute a changed-fields set, then skips any rule/column whose dependencies didn't change.
+- **Per-cell column cache.** When a column's deps for a specific strike haven't changed, the cached value is reused — no AST walk for that cell.
+- **Result indexes.** Worker results (rule matches, column values) are inverted into per-strike maps once on the main thread, giving the table O(1) reads per cell render.
+- **Memoized rows.** `StrikeRow` is wrapped in `React.memo`; the table re-renders only the strikes whose props identity changed.
+- **CSS-only sticky behavior.** The spot row uses `position: sticky` with both `top` and `bottom` set — no IntersectionObserver, no scroll listeners.
+- **TanStack Query for HTTP.** `/api/expiries/:symbol` is cached with a 30s stale time and auto-cancelled on symbol change. The AI parse mutation cancels stale in-flight requests as the user keeps typing.
+- **Lazy compute bridge.** Stored in a `useRef` rather than `useMemo` so React 18 StrictMode's mount → unmount → remount doesn't terminate the worker on first paint.
+
+Production bundle: ~270 KB JS, ~82 KB gzipped.
+
+---
+
+## Roadmap
+
+- **Benchmark with 50+ rules / 10+ columns** to validate the < 5ms-per-tick worker target
+- **Virtual scrolling** — fine for NIFTY's ~40 strikes, but a full equity chain would need it
+- **Multi-symbol view** — split-screen comparison (e.g. NIFTY + BANKNIFTY side by side)
+- **Historical sparklines per cell** — a small inline chart for OI / LTP over the last N ticks
+- **Visual rule builder** — drag-and-drop conditions, presets that fork into custom rules
+- **Real NSE without a proxy** — currently blocked by Akamai bot protection; would need a residential proxy or a headless-browser scraper in `nse-fetcher.ts`
+- **Sharing** — export a rule + column set as JSON and import into another session
