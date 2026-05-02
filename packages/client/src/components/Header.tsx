@@ -148,18 +148,6 @@ export function Header<S extends string>({
           </svg>
           <span className="font-mono text-[10px] uppercase tracking-[0.06em]">{expanded ? 'Wide' : 'Slim'}</span>
         </button>
-        <button
-          title="Settings"
-          className="hidden md:flex w-7 h-7 rounded-md items-center justify-center text-ink-3 hover:bg-bg-2 hover:text-ink transition-colors border border-transparent"
-        >
-          <Icon name="settings" size={15} />
-        </button>
-        <button
-          title="Account"
-          className="hidden md:flex w-7 h-7 rounded-md items-center justify-center font-mono text-[11px] font-semibold bg-bg-3 text-ink border border-line-2"
-        >
-          A
-        </button>
       </div>
     </header>
   );
