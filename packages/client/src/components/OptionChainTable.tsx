@@ -299,10 +299,10 @@ function SpotDivider({ spot, baseSpot, totalCols, rowRef }: {
   return (
     <tr
       ref={rowRef}
-      className="spot-row sticky top-9 bottom-0 z-[4] bg-bg-0"
+      className="spot-row sticky top-12 bottom-0 z-[4] bg-bg-0"
     >
       <td colSpan={totalCols} className="relative p-0">
-        <div className="relative border-t border-b border-line-2 bg-bg-1/40 h-7 flex items-center">
+        <div className="relative border-t border-b border-line-2 bg-bg-1/40 h-9 flex items-center">
           {/*
             Horizontal sticky wrapper. The td spans the full table width
             (which can be > viewport when expanded or with custom columns).
