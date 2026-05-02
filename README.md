@@ -1,5 +1,7 @@
 # tradl / option-chain
 
+Live: https://tradl-option-chain-production.up.railway.app/
+
 Live NSE option chain with a client-side rule engine, custom column builder, and an AI command palette that turns plain English into engine-ready rules and columns.
 
 ## Run locally
