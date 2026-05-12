@@ -9,7 +9,8 @@ import { dirname, join } from 'path';
 import { fetchOptionChain, fetchExpiries } from './nse-fetcher.js';
 import { buildSnapshot } from './data-transformer.js';
 import { buildMockSnapshot, getMockExpiries } from './mock-source.js';
-import { parseAi, type AIParseRequest } from './ai-parse.js';
+import { parseAi, AIValidationError, type AIParseRequest } from './ai-parse.js';
+import { setLatestSnapshot } from './snapshot-store.js';
 import type { OptionChainSnapshot, WsServerMessage } from './types.js';
 
 // Keep the server alive when a downstream socket dies mid-write (EPIPE) or a
@@ -74,6 +75,7 @@ async function pollOnce(symbol: string, expiryDate?: string): Promise<void> {
     const snapshot = await fetchSnapshot(symbol, expiryDate);
     s.latest = snapshot;
     s.latestError = null;
+    setLatestSnapshot(symbol, snapshot);
     broadcast(symbol, { type: 'snapshot', payload: snapshot });
     console.log(
       `[${symbol}] snapshot ${snapshot.rows.length} strikes, expiry ${snapshot.expiryDate}, spot ${snapshot.underlyingValue}`,
@@ -126,16 +128,22 @@ app.post('/api/ai/parse', async (req, res) => {
     return res.status(400).json({ error: 'input is too long (max 1000 chars)' });
   }
   try {
+    const symbol = typeof body.symbol === 'string' ? body.symbol.toUpperCase() : undefined;
     const result = await parseAi({
       input: body.input,
       availableFields: Array.isArray(body.availableFields) ? body.availableFields : [],
       existingRules: Array.isArray(body.existingRules) ? body.existingRules : [],
       existingColumns: Array.isArray(body.existingColumns) ? body.existingColumns : [],
+      symbol,
     });
     if (res.writableEnded) return;
     res.json(result);
   } catch (err) {
     if (res.writableEnded) return;
+    if (err instanceof AIValidationError) {
+      console.warn(`[ai/parse] validation failed: ${err.detail}`);
+      return res.status(422).json({ error: err.userError, detail: err.detail, draft: err.draft });
+    }
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('ANTHROPIC_API_KEY')) {
       return res.status(503).json({ error: 'AI is not configured on the server (set ANTHROPIC_API_KEY)' });

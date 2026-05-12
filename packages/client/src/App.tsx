@@ -181,6 +181,7 @@ export function App() {
         rules={rules}
         columns={columns}
         rows={data.rows}
+        symbol={symbol}
         mouse={mouse}
         anchor={palette.anchor}
         onApplyRule={(rule) => setRules((rs) => [...rs, rule])}

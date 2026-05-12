@@ -1,31 +1,6 @@
-export interface OptionChainRow {
-  strikePrice: number;
-  expiryDate: string;
-
-  call_oi: number;
-  call_oiChange: number;
-  call_volume: number;
-  call_iv: number;
-  call_ltp: number;
-  call_netChange: number;
-  call_bidQty: number;
-  call_bidPrice: number;
-  call_askQty: number;
-  call_askPrice: number;
-
-  put_oi: number;
-  put_oiChange: number;
-  put_volume: number;
-  put_iv: number;
-  put_ltp: number;
-  put_netChange: number;
-  put_bidQty: number;
-  put_bidPrice: number;
-  put_askQty: number;
-  put_askPrice: number;
-
-  underlyingValue: number;
-}
+import type { OptionChainRow, NumericField } from '@tradl/shared';
+export type { OptionChainRow, NumericField } from '@tradl/shared';
+export { NUMERIC_FIELDS } from '@tradl/shared';
 
 export interface OptionChainSnapshot {
   symbol: string;
@@ -38,16 +13,6 @@ export interface OptionChainSnapshot {
 export type WsServerMessage =
   | { type: 'snapshot'; payload: OptionChainSnapshot }
   | { type: 'error'; message: string };
-
-export type NumericField = Exclude<keyof OptionChainRow, 'expiryDate'>;
-
-export const NUMERIC_FIELDS: readonly NumericField[] = [
-  'strikePrice', 'underlyingValue',
-  'call_oi', 'call_oiChange', 'call_volume', 'call_iv', 'call_ltp', 'call_netChange',
-  'call_bidQty', 'call_bidPrice', 'call_askQty', 'call_askPrice',
-  'put_oi', 'put_oiChange', 'put_volume', 'put_iv', 'put_ltp', 'put_netChange',
-  'put_bidQty', 'put_bidPrice', 'put_askQty', 'put_askPrice',
-];
 
 // ───── Rules ─────
 
@@ -105,6 +70,11 @@ export interface RuleDefinition {
 export interface RuleMatch {
   strikePrice: number;
   matchedConditionIndices: number[];
+  // Union of NumericField deps across the conditions that matched. Drives
+  // per-cell tinting: a cell at (strike, field) is tinted by this rule iff
+  // `field` appears here. Empty array means the rule's coloring should not
+  // be cell-scoped (defensive — should not happen for any predicate).
+  affectedFields: NumericField[];
 }
 
 export interface RuleResult {

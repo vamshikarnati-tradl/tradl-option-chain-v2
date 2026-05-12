@@ -10,7 +10,7 @@ import { usePalettePosition } from './usePalettePosition';
 import { PAL_W, type Status } from './types';
 import {
   AIParseError, columnFromAi, ruleFromAi,
-  type AIParseResult,
+  type AIParseResult, type AITurn,
 } from '../../services/aiParse';
 import { loadRecent, recordRecent, type RecentEntry } from '../../services/aiHistory';
 import { useAiParse } from '../../hooks/useAiParse';
@@ -24,6 +24,9 @@ interface Props {
   rules: RuleDefinition[];
   columns: CustomColumnDefinition[];
   rows: OptionChainRow[];
+  // Symbol the user is currently viewing. Passed to /api/ai/parse so the
+  // server can pick its ATM sample row for dry-run validation.
+  symbol: string;
   /** Live cursor position. Used when `anchor === 'cursor'`. */
   mouse: { x: number; y: number } | null;
   /**
@@ -37,13 +40,18 @@ interface Props {
 }
 
 export function CommandPalette({
-  open, onClose, rules, columns, rows, mouse, anchor, onApplyRule, onApplyColumn,
+  open, onClose, rules, columns, rows, symbol, mouse, anchor, onApplyRule, onApplyColumn,
 }: Props) {
   const [input, setInput] = useState('');
   const [editingJson, setEditingJson] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentEntry[]>(() => loadRecent());
+  const [refineInput, setRefineInput] = useState('');
+  const [turns, setTurns] = useState<AITurn[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  // The text that produced the currently-displayed result. Push this into
+  // `turns` when the user submits a refine so the LLM sees the prior question.
+  const lastInputRef = useRef('');
 
   // Keep the sheet mounted briefly after `open` flips false so the slide-down
   // exit animation can play. `entered` controls the transform/opacity classes
@@ -85,6 +93,9 @@ export function CommandPalette({
       setInput('');
       setEditingJson(null);
       setRecent(loadRecent());
+      setRefineInput('');
+      setTurns([]);
+      lastInputRef.current = '';
       parse.reset();
       requestAnimationFrame(() => inputRef.current?.focus());
     }
@@ -125,11 +136,38 @@ export function CommandPalette({
     const trimmed = (text ?? input).trim();
     if (!trimmed || parse.isPending) return;
     if (text !== undefined && text !== input) setInput(text);
+    // Fresh query → drop any accumulated turns so the LLM doesn't bleed
+    // context from the previous question into a different one.
+    setTurns([]);
+    setRefineInput('');
+    lastInputRef.current = trimmed;
     parse.mutate({
       input: trimmed,
       availableFields: [...NUMERIC_FIELDS],
       existingRules: rules.map((r) => r.name),
       existingColumns: columns.map((c) => c.name),
+      symbol,
+      history: [],
+    });
+  };
+
+  const submitRefine = () => {
+    const trimmed = refineInput.trim();
+    if (!trimmed || parse.isPending || !result) return;
+    const nextTurns: AITurn[] = [
+      ...turns,
+      { userText: lastInputRef.current, assistantJson: JSON.stringify(result) },
+    ].slice(-4);
+    setTurns(nextTurns);
+    lastInputRef.current = trimmed;
+    setRefineInput('');
+    parse.mutate({
+      input: trimmed,
+      availableFields: [...NUMERIC_FIELDS],
+      existingRules: rules.map((r) => r.name),
+      existingColumns: columns.map((c) => c.name),
+      symbol,
+      history: nextTurns,
     });
   };
 
@@ -147,6 +185,9 @@ export function CommandPalette({
         onApplyColumn(built);
         setRecent(recordRecent({ query: input.trim(), intent: 'column', name: built.name }));
       }
+      setTurns([]);
+      setRefineInput('');
+      lastInputRef.current = '';
       onClose();
     } catch (e) {
       // Surface JSON parse failure inline by feeding it through the mutation
@@ -248,6 +289,10 @@ export function CommandPalette({
               submit(hint + input);
             }}
             onRephrase={() => { inputRef.current?.focus(); inputRef.current?.select(); }}
+            refineValue={refineInput}
+            onRefineChange={setRefineInput}
+            onRefineSubmit={submitRefine}
+            isRefining={parse.isPending}
           />
         )}
         {status === 'preview' && result && editingJson !== null && (

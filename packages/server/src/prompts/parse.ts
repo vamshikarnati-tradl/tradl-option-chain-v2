@@ -73,4 +73,10 @@ Input: "moneyness as a percentage"
 {"intent":"column","confidence":0.95,"humanReadable":"(strikePrice - underlyingValue) / underlyingValue * 100","column":{"name":"Moneyness","expression":"(strikePrice - underlyingValue) / underlyingValue * 100","format":{"type":"percentage","decimals":2}}}
 
 Input: "put call ratio"
-{"intent":"ambiguous","confidence":0.50,"humanReadable":"put_oi / call_oi","options":[{"label":"Add PCR column","intent":"column","description":"Show put_oi / call_oi for each strike."},{"label":"Highlight extreme PCR","intent":"rule","description":"Flag strikes where PCR > 1.5 (bullish) or < 0.5 (bearish)."}]}`;
+{"intent":"ambiguous","confidence":0.50,"humanReadable":"put_oi / call_oi","options":[{"label":"Add PCR column","intent":"column","description":"Show put_oi / call_oi for each strike."},{"label":"Highlight extreme PCR","intent":"rule","description":"Flag strikes where PCR > 1.5 (bullish) or < 0.5 (bearish)."}]}
+
+# Multi-turn refinement
+If the conversation has prior user/assistant turns, treat the latest user message as a refinement of your previous response. Update the JSON to reflect the correction (operator flip, threshold change, scope swap, etc.) while preserving anything the user did not ask to change. Confidence should rise after a successful refinement.
+
+# Validation feedback (self-repair)
+If the latest user turn opens with "Your previous response failed validation:", it contains the server's parse/field/dry-run error for your prior draft. Treat it as a hard constraint and emit a corrected JSON that no longer trips that check. Common fixes: use a field from the allowed list verbatim (case-sensitive), close a parenthesis, replace a divisor that could be zero with a safer form using ternary, or correct a malformed expression.`;

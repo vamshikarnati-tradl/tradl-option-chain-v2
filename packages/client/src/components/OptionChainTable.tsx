@@ -4,12 +4,16 @@
 // Expanded adds Call Vol · Call IV on the left, Put IV · Put Vol on the right.
 // OI/LTP cells are "stacked": value on top, percent change below.
 
-import { Fragment, memo, useEffect, useMemo, useRef } from 'react';
-import type { CustomColumnDefinition, OptionChainRow } from '../core/types';
-import { type AppliedRule, type ColumnIndex, type RuleHighlight, bgForScope } from '../core/result-index';
+import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ColumnCellResult, CustomColumnDefinition, NumericField, OptionChainRow } from '../core/types';
+import {
+  type AppliedRule, type CellStyle, type ColumnIndex, type RuleHighlight,
+  bgForCell, rulesForCell,
+} from '../core/result-index';
 import { ruleHsl } from '../core/palette';
 import { fmtChange, fmtInt, fmtNum, fmtPct } from '../utils/format';
 import { useFlash } from '../hooks/useFlash';
+import { CellTooltip, type CellTooltipInfo, type CellTooltipPayload } from './CellTooltip';
 
 interface Props {
   rows: OptionChainRow[];
@@ -26,16 +30,24 @@ interface Props {
   scrollResetKey?: string;
 }
 
-type ExtraCol = { key: keyof OptionChainRow; label: string; kind: 'int' | 'num' };
+type ExtraCol = { key: keyof OptionChainRow; label: string; kind: 'int' | 'num'; fields: readonly NumericField[] };
 
 const EXTRA_CALL: ExtraCol[] = [
-  { key: 'call_volume', label: 'Call Vol', kind: 'int' },
-  { key: 'call_iv',     label: 'Call IV',  kind: 'num' },
+  { key: 'call_volume', label: 'Call Vol', kind: 'int', fields: ['call_volume'] },
+  { key: 'call_iv',     label: 'Call IV',  kind: 'num', fields: ['call_iv'] },
 ];
 const EXTRA_PUT: ExtraCol[] = [
-  { key: 'put_iv',      label: 'Put IV',   kind: 'num' },
-  { key: 'put_volume',  label: 'Put Vol',  kind: 'int' },
+  { key: 'put_iv',      label: 'Put IV',   kind: 'num', fields: ['put_iv'] },
+  { key: 'put_volume',  label: 'Put Vol',  kind: 'int', fields: ['put_volume'] },
 ];
+
+// Each stack-cell shows a primary value + percent-change derived from a
+// companion field. Both should count for tinting purposes.
+const CALL_OI_FIELDS  = ['call_oi', 'call_oiChange'] as const;
+const CALL_LTP_FIELDS = ['call_ltp', 'call_netChange'] as const;
+const PUT_OI_FIELDS   = ['put_oi', 'put_oiChange'] as const;
+const PUT_LTP_FIELDS  = ['put_ltp', 'put_netChange'] as const;
+const STRIKE_FIELDS   = ['strikePrice', 'underlyingValue'] as const;
 
 // ─────────── Cells ───────────
 
@@ -129,10 +141,15 @@ function RuleChipStrip({ applied }: { applied: AppliedRule[] | undefined }) {
 
 // ─────────── Strike cell ───────────
 
-function StrikeCell({ row, isATM, applied }: {
+function StrikeCell({ row, isATM, applied, style, hover }: {
   row: OptionChainRow;
   isATM: boolean;
   applied: AppliedRule[] | undefined;
+  style: CellStyle;
+  hover: {
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => void;
+    onMouseLeave: () => void;
+  };
 }) {
   const isCallITM = row.strikePrice < row.underlyingValue;
   const isPutITM = row.strikePrice > row.underlyingValue;
@@ -144,7 +161,7 @@ function StrikeCell({ row, isATM, applied }: {
   if (isPutITM) { markerColor = 'bg-neg/70'; markerWidth = 18; }
 
   return (
-    <td className="px-1.5 sm:px-3 py-2.5 text-center tnum strike-cell">
+    <td className="px-1.5 sm:px-3 py-2.5 text-center tnum strike-cell" style={style} {...hover}>
       <div className="leading-tight">
         <div className={isATM
           ? 'text-[13px] sm:text-[14px] font-semibold text-ink'
@@ -166,24 +183,27 @@ function StrikeCell({ row, isATM, applied }: {
 
 // ─────────── Strike row ───────────
 
+type CellEnter = (info: CellTooltipInfo, e: React.MouseEvent<HTMLElement>) => void;
+type CellLeave = () => void;
+
 interface RowProps {
   row: OptionChainRow;
   prev?: OptionChainRow;
   isATM: boolean;
   expanded: boolean;
   applied: AppliedRule[] | undefined;
-  cells: { def: CustomColumnDefinition; cell: { value: number | null; error?: string } }[];
+  cellMap: Map<NumericField, AppliedRule[]> | undefined;
+  cells: { def: CustomColumnDefinition; cell: ColumnCellResult }[];
   customColDefs: CustomColumnDefinition[];
   onHover?: (row: OptionChainRow | null, matched: AppliedRule[] | null) => void;
+  onCellEnter: CellEnter;
+  onCellLeave: CellLeave;
 }
 
 const StrikeRow = memo(function StrikeRow({
-  row, prev, isATM, expanded, applied, cells, customColDefs, onHover,
+  row, prev, isATM, expanded, applied, cellMap, cells, customColDefs,
+  onHover, onCellEnter, onCellLeave,
 }: RowProps) {
-  const callBg = bgForScope(applied, 'call');
-  const putBg  = bgForScope(applied, 'put');
-  const rowBg  = bgForScope(applied, 'row');
-
   const isCallITM = row.strikePrice < row.underlyingValue;
   const isPutITM  = row.strikePrice > row.underlyingValue;
 
@@ -193,56 +213,73 @@ const StrikeRow = memo(function StrikeRow({
   const callItm = isCallITM ? ' itm-call' : '';
   const putItm = isPutITM ? ' itm-put' : '';
 
+  const styleFor = (fields: readonly NumericField[]): CellStyle =>
+    bgForCell(rulesForCell(cellMap, fields));
+  const callOiStyle  = styleFor(CALL_OI_FIELDS);
+  const callLtpStyle = styleFor(CALL_LTP_FIELDS);
+  const putLtpStyle  = styleFor(PUT_LTP_FIELDS);
+  const putOiStyle   = styleFor(PUT_OI_FIELDS);
+  const strikeStyle  = styleFor(STRIKE_FIELDS);
+
+  const ruleHover = (fields: readonly NumericField[]) => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+      const rules = rulesForCell(cellMap, fields);
+      if (!rules?.length) return;
+      onCellEnter({ kind: 'rule', row, fields, applied: rules }, e);
+    },
+    onMouseLeave: onCellLeave,
+  });
+  const customHover = (def: CustomColumnDefinition, cell: ColumnCellResult) => ({
+    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
+      onCellEnter({ kind: 'custom', row, def, cell }, e);
+    },
+    onMouseLeave: onCellLeave,
+  });
+
   return (
     <tr
       className={`group transition-colors hover:bg-bg-1/60 ${isATM ? 'r-atm' : ''}`}
       onMouseEnter={() => onHover?.(row, applied ?? [])}
       onMouseLeave={() => onHover?.(null, null)}
-      style={rowBg ? { background: rowBg } : undefined}
     >
       {/* Call extras (Vol, IV) */}
       {expanded && EXTRA_CALL.map((c) => (
         <td
           key={c.key}
           className={`${cellBase} text-ink-3${callItm}`}
-          style={callBg ? { background: callBg } : undefined}
+          style={styleFor(c.fields)}
+          {...ruleHover(c.fields)}
         >
           <PlainCell value={row[c.key] as number} prevValue={prev?.[c.key] as number | undefined} kind={c.kind} />
         </td>
       ))}
 
       {/* Call OI */}
-      <td
-        className={`${cellBase}${callItm}`}
-        style={callBg ? { background: callBg } : undefined}
-      >
+      <td className={`${cellBase}${callItm}`} style={callOiStyle} {...ruleHover(CALL_OI_FIELDS)}>
         <StackCell value={row.call_oi} change={row.call_oiChange} prevValue={prev?.call_oi} isPrice={false} />
       </td>
 
       {/* Call LTP */}
-      <td
-        className={`${cellBase}${callItm}`}
-        style={callBg ? { background: callBg } : undefined}
-      >
+      <td className={`${cellBase}${callItm}`} style={callLtpStyle} {...ruleHover(CALL_LTP_FIELDS)}>
         <StackCell value={row.call_ltp} change={row.call_netChange} prevValue={prev?.call_ltp} isPrice={true} />
       </td>
 
       {/* STRIKE */}
-      <StrikeCell row={row} isATM={isATM} applied={applied} />
+      <StrikeCell
+        row={row}
+        isATM={isATM}
+        applied={applied}
+        style={strikeStyle}
+        hover={ruleHover(STRIKE_FIELDS)}
+      />
 
       {/* Put LTP */}
-      <td
-        className={`${cellBase}${putItm}`}
-        style={putBg ? { background: putBg } : undefined}
-      >
+      <td className={`${cellBase}${putItm}`} style={putLtpStyle} {...ruleHover(PUT_LTP_FIELDS)}>
         <StackCell value={row.put_ltp} change={row.put_netChange} prevValue={prev?.put_ltp} isPrice={true} />
       </td>
 
       {/* Put OI */}
-      <td
-        className={`${cellBase}${putItm}`}
-        style={putBg ? { background: putBg } : undefined}
-      >
+      <td className={`${cellBase}${putItm}`} style={putOiStyle} {...ruleHover(PUT_OI_FIELDS)}>
         <StackCell value={row.put_oi} change={row.put_oiChange} prevValue={prev?.put_oi} isPrice={false} />
       </td>
 
@@ -251,7 +288,8 @@ const StrikeRow = memo(function StrikeRow({
         <td
           key={c.key}
           className={`${cellBase} text-ink-3${putItm}`}
-          style={putBg ? { background: putBg } : undefined}
+          style={styleFor(c.fields)}
+          {...ruleHover(c.fields)}
         >
           <PlainCell value={row[c.key] as number} prevValue={prev?.[c.key] as number | undefined} kind={c.kind} />
         </td>
@@ -260,10 +298,15 @@ const StrikeRow = memo(function StrikeRow({
       {/* Custom columns */}
       {customColDefs.map((col) => {
         const entry = cellsByCol.get(col.id);
-        const v = entry?.cell.value ?? null;
-        const err = entry?.cell.error;
+        const cell = entry?.cell ?? { strikePrice: row.strikePrice, value: null };
+        const v = cell.value;
+        const err = cell.error;
         return (
-          <td key={col.id} className={`${cellBase} text-ink custom-col`}>
+          <td
+            key={col.id}
+            className={`${cellBase} text-ink custom-col`}
+            {...customHover(col, cell)}
+          >
             {v == null ? (
               <span className="text-ink-4 italic" title={err ?? 'no value'}>—</span>
             ) : (
@@ -366,6 +409,13 @@ export function OptionChainTable({
   const baseSpotRef = useRef<number>(0);
   if (baseSpotRef.current === 0 && spot > 0) baseSpotRef.current = spot;
 
+  const [cellHover, setCellHover] = useState<CellTooltipPayload | null>(null);
+  const onCellEnter = useCallback<CellEnter>((info, e) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setCellHover({ ...info, anchor: { rect } } as CellTooltipPayload);
+  }, []);
+  const onCellLeave = useCallback<CellLeave>(() => setCellHover(null), []);
+
   // The spot divider goes between the last OTM and first ITM strike — i.e.
   // before the first row whose strike >= spot.
   const spotIdx = useMemo(() => rows.findIndex((r) => r.strikePrice >= spot), [rows, spot]);
@@ -434,14 +484,18 @@ export function OptionChainTable({
                 isATM={row.strikePrice === atm}
                 expanded={expanded}
                 applied={highlights.byStrike.get(row.strikePrice)}
+                cellMap={highlights.byCell.get(row.strikePrice)}
                 cells={columnIndex.byStrike.get(row.strikePrice) ?? []}
                 customColDefs={customCols}
                 onHover={onRowHover}
+                onCellEnter={onCellEnter}
+                onCellLeave={onCellLeave}
               />
             </Fragment>
           ))}
         </tbody>
       </table>
+      <CellTooltip payload={cellHover} />
     </div>
   );
 }

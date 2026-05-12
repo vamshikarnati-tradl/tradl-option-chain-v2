@@ -7,11 +7,11 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspaces --if-present",
-    "dev:server": "npm run dev --workspace @tradl/server",
-    "dev:client": "npm run dev --workspace @tradl/client",
-    "build": "npm run build --workspaces --if-present",
+    "dev:server": "npm run build -w @tradl/shared && npm run dev --workspace @tradl/server",
+    "dev:client": "npm run build -w @tradl/shared && npm run dev --workspace @tradl/client",
+    "build": "npm run build -w @tradl/shared && npm run build -w @tradl/server && npm run build -w @tradl/client",
     "start": "node packages/server/dist/index.js",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run build -w @tradl/shared && npm run typecheck --workspaces --if-present"
   },
   "engines": {
     "node": ">=20"

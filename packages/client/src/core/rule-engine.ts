@@ -91,7 +91,15 @@ export function evaluateCompiledRule(rule: CompiledRule, rows: OptionChainRow[])
       if (checkCondition(conds[i], row)) matched.push(i);
     }
     const ok = isAnd ? matched.length === conds.length : matched.length > 0;
-    if (ok) matches.push({ strikePrice: row.strikePrice, matchedConditionIndices: matched });
+    if (ok) {
+      const affected = new Set<NumericField>();
+      for (const idx of matched) for (const d of conds[idx].deps) affected.add(d);
+      matches.push({
+        strikePrice: row.strikePrice,
+        matchedConditionIndices: matched,
+        affectedFields: [...affected],
+      });
+    }
   }
   return { ruleId: rule.source.id, matches };
 }

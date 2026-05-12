@@ -36,12 +36,31 @@ export interface AIParseResult {
   rule?: RawRule;
   column?: RawColumn;
   options?: AmbiguousOption[];
+  // Server returned this after a successful self-repair retry. Lets the
+  // palette show a subtle "corrected by AI" hint.
+  repaired?: boolean;
 }
 
 export class AIParseError extends Error {
-  constructor(message: string, public readonly status?: number) {
+  constructor(
+    message: string,
+    public readonly status?: number,
+    // Validator's longer explanation (422 only).
+    public readonly detail?: string,
+    // The original LLM draft that failed validation (422 only). Lets the
+    // palette drop into the JSON editor so the user can hand-fix.
+    public readonly draft?: AIParseResult,
+  ) {
     super(message);
   }
+}
+
+// One previous turn of the refine conversation. The client sends an array of
+// these so the server can replay the chat statelessly. `assistantJson` is the
+// stringified prior AIParseResult (matches what the LLM emitted).
+export interface AITurn {
+  userText: string;
+  assistantJson: string;
 }
 
 export interface AIParseRequest {
@@ -49,6 +68,12 @@ export interface AIParseRequest {
   availableFields: string[];
   existingRules: string[];
   existingColumns: string[];
+  // Identifies which symbol the server should pick its ATM sample row from
+  // for the dry-run validation.
+  symbol?: string;
+  // Prior turns of the refine conversation (oldest → newest). Capped server-
+  // side to bound payload.
+  history?: AITurn[];
 }
 
 export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSignal): Promise<AIParseResult> {
@@ -60,7 +85,12 @@ export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSi
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new AIParseError(body.error ?? `Parse failed (${res.status})`, res.status);
+    throw new AIParseError(
+      body.error ?? `Parse failed (${res.status})`,
+      res.status,
+      body.detail,
+      body.draft,
+    );
   }
   return (await res.json()) as AIParseResult;
 }

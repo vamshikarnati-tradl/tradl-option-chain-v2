@@ -31,6 +31,14 @@ export function ColumnPreview({ result, rows, onApply, onEditJson, onRephrase }:
         <StatePill tone="accent">ƒ Column</StatePill>
         <span className="text-[13px] font-medium truncate">{c.name}</span>
         <StatePill tone="neutral">{c.format.type}</StatePill>
+        {result.repaired && (
+          <span
+            className="px-1.5 py-0.5 rounded text-[10px] font-mono text-ink-3 bg-bg-3"
+            title="The model's first draft failed validation. The server prompted it once more to fix the issue."
+          >
+            ↻ auto-corrected
+          </span>
+        )}
         <span className="ml-auto"><ConfidenceBar value={result.confidence} /></span>
       </div>
 
