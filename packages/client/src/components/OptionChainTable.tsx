@@ -13,7 +13,7 @@ import {
 import { ruleHsl } from '../core/palette';
 import { fmtChange, fmtInt, fmtNum, fmtPct } from '../utils/format';
 import { useFlash } from '../hooks/useFlash';
-import { CellTooltip, type CellTooltipInfo, type CellTooltipPayload } from './CellTooltip';
+import { HoverTooltip, type HoverPayload } from './HoverTooltip';
 
 interface Props {
   rows: OptionChainRow[];
@@ -21,7 +21,10 @@ interface Props {
   highlights: RuleHighlight;
   columnIndex: ColumnIndex;
   expanded?: boolean;
-  onRowHover?: (row: OptionChainRow | null, matched: AppliedRule[] | null) => void;
+  // Live cursor position — drives the unified HoverTooltip's placement. The
+  // table owns its own hover state for *what* to show; the App passes mouse
+  // coords for *where* to draw.
+  mouse: { x: number; y: number } | null;
   /**
    * When this value changes, the table re-centers on the spot row on the
    * next data render. Pass `symbol` (or anything else that should re-trigger
@@ -183,7 +186,7 @@ function StrikeCell({ row, isATM, applied, style, hover }: {
 
 // ─────────── Strike row ───────────
 
-type CellEnter = (info: CellTooltipInfo, e: React.MouseEvent<HTMLElement>) => void;
+type CellEnter = (info: HoverPayload) => void;
 type CellLeave = () => void;
 
 interface RowProps {
@@ -195,14 +198,13 @@ interface RowProps {
   cellMap: Map<NumericField, AppliedRule[]> | undefined;
   cells: { def: CustomColumnDefinition; cell: ColumnCellResult }[];
   customColDefs: CustomColumnDefinition[];
-  onHover?: (row: OptionChainRow | null, matched: AppliedRule[] | null) => void;
   onCellEnter: CellEnter;
   onCellLeave: CellLeave;
 }
 
 const StrikeRow = memo(function StrikeRow({
   row, prev, isATM, expanded, applied, cellMap, cells, customColDefs,
-  onHover, onCellEnter, onCellLeave,
+  onCellEnter, onCellLeave,
 }: RowProps) {
   const isCallITM = row.strikePrice < row.underlyingValue;
   const isPutITM  = row.strikePrice > row.underlyingValue;
@@ -221,17 +223,18 @@ const StrikeRow = memo(function StrikeRow({
   const putOiStyle   = styleFor(PUT_OI_FIELDS);
   const strikeStyle  = styleFor(STRIKE_FIELDS);
 
+  // Every tintable cell reports the row context AND the field list it
+  // represents on mouseEnter. Rules tinting that cell (if any) ride along so
+  // the tooltip can break them out with live values.
   const ruleHover = (fields: readonly NumericField[]) => ({
-    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
-      const rules = rulesForCell(cellMap, fields);
-      if (!rules?.length) return;
-      onCellEnter({ kind: 'rule', row, fields, applied: rules }, e);
+    onMouseEnter: () => {
+      onCellEnter({ row, fields, applied: rulesForCell(cellMap, fields) ?? [] });
     },
     onMouseLeave: onCellLeave,
   });
   const customHover = (def: CustomColumnDefinition, cell: ColumnCellResult) => ({
-    onMouseEnter: (e: React.MouseEvent<HTMLElement>) => {
-      onCellEnter({ kind: 'custom', row, def, cell }, e);
+    onMouseEnter: () => {
+      onCellEnter({ row, custom: { def, cell } });
     },
     onMouseLeave: onCellLeave,
   });
@@ -239,8 +242,7 @@ const StrikeRow = memo(function StrikeRow({
   return (
     <tr
       className={`group transition-colors hover:bg-bg-1/60 ${isATM ? 'r-atm' : ''}`}
-      onMouseEnter={() => onHover?.(row, applied ?? [])}
-      onMouseLeave={() => onHover?.(null, null)}
+      onMouseLeave={onCellLeave}
     >
       {/* Call extras (Vol, IV) */}
       {expanded && EXTRA_CALL.map((c) => (
@@ -401,7 +403,7 @@ function findAtmStrike(rows: OptionChainRow[], spot: number): number | null {
 }
 
 export function OptionChainTable({
-  rows, prevRowsByStrike, highlights, columnIndex, expanded = false, onRowHover,
+  rows, prevRowsByStrike, highlights, columnIndex, expanded = false, mouse,
   scrollResetKey,
 }: Props) {
   const spot = rows[0]?.underlyingValue ?? 0;
@@ -409,12 +411,9 @@ export function OptionChainTable({
   const baseSpotRef = useRef<number>(0);
   if (baseSpotRef.current === 0 && spot > 0) baseSpotRef.current = spot;
 
-  const [cellHover, setCellHover] = useState<CellTooltipPayload | null>(null);
-  const onCellEnter = useCallback<CellEnter>((info, e) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setCellHover({ ...info, anchor: { rect } } as CellTooltipPayload);
-  }, []);
-  const onCellLeave = useCallback<CellLeave>(() => setCellHover(null), []);
+  const [hover, setHover] = useState<HoverPayload | null>(null);
+  const onCellEnter = useCallback<CellEnter>((info) => setHover(info), []);
+  const onCellLeave = useCallback<CellLeave>(() => setHover(null), []);
 
   // The spot divider goes between the last OTM and first ITM strike — i.e.
   // before the first row whose strike >= spot.
@@ -487,7 +486,6 @@ export function OptionChainTable({
                 cellMap={highlights.byCell.get(row.strikePrice)}
                 cells={columnIndex.byStrike.get(row.strikePrice) ?? []}
                 customColDefs={customCols}
-                onHover={onRowHover}
                 onCellEnter={onCellEnter}
                 onCellLeave={onCellLeave}
               />
@@ -495,7 +493,7 @@ export function OptionChainTable({
           ))}
         </tbody>
       </table>
-      <CellTooltip payload={cellHover} />
+      <HoverTooltip payload={hover} mouse={mouse} />
     </div>
   );
 }

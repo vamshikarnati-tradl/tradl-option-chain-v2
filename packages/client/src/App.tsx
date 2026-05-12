@@ -3,7 +3,6 @@ import { Header } from './components/Header';
 import { OptionChainTable } from './components/OptionChainTable';
 import { RulesPanel } from './components/RulesPanel';
 import { ColumnsPanel } from './components/ColumnsPanel';
-import { HoverTooltip } from './components/HoverTooltip';
 import { CommandPalette } from './components/CommandPalette';
 import { BottomBar } from './components/BottomBar';
 import { useOptionChain } from './hooks/useOptionChain';
@@ -17,9 +16,9 @@ import { useSessionBaseSpot } from './hooks/useSessionBaseSpot';
 import { usePersistedToggle } from './hooks/usePersistedToggle';
 import { useIsTablet } from './hooks/useMediaQuery';
 import { loadColumns, loadRules, saveColumns, saveRules } from './core/persistence';
-import { indexColumnResults, indexRuleResults, type AppliedRule } from './core/result-index';
+import { indexColumnResults, indexRuleResults } from './core/result-index';
 import { STORAGE_KEYS } from './core/storage-keys';
-import type { CustomColumnDefinition, OptionChainRow, RuleDefinition } from './core/types';
+import type { CustomColumnDefinition, RuleDefinition } from './core/types';
 
 const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'] as const;
 type SymbolName = typeof SYMBOLS[number];
@@ -43,9 +42,6 @@ export function App() {
   const palette = usePaletteController();
   const mouse = useMouseTracking();
   useGlobalShortcut({ onSlash: palette.openAtCursor, onCmdK: palette.openCentered });
-
-  const [hoverRow, setHoverRow] = useState<OptionChainRow | null>(null);
-  const [hoverMatched, setHoverMatched] = useState<AppliedRule[] | null>(null);
 
   // Persist user changes
   useEffect(() => saveRules(rules), [rules]);
@@ -136,10 +132,7 @@ export function App() {
           columnIndex={columnIndex}
           expanded={tableExpanded}
           scrollResetKey={symbol}
-          onRowHover={(row, matched) => {
-            setHoverRow(row);
-            setHoverMatched(matched);
-          }}
+          mouse={palette.open ? null : mouse}
         />
       </main>
 
@@ -170,10 +163,6 @@ export function App() {
         sampleRow={sampleRow}
         onChange={setColumns}
       />
-
-      {hoverRow && !palette.open && (
-        <HoverTooltip row={hoverRow} matched={hoverMatched} mouse={mouse} />
-      )}
 
       <CommandPalette
         open={palette.open}
