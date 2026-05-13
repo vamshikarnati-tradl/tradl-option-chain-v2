@@ -24,13 +24,51 @@ ANTHROPIC_API_KEY=sk-ant-...
 
 Without the key, only the palette returns 503 — the rest of the app works.
 
-### Optional: live NSE feed
+### Live data sources
+
+The server can pull the option chain from three places. All three produce the same `OptionChainRow` shape on the wire, so the rule engine, custom columns, and table render exercise one code path:
 
 ```bash
+# Default: synthetic mock generator (no network, no creds).
+npm run dev:server
+
+# NSE option-chain endpoint — REST poll every 60 s, Akamai-gated. Flaky.
 DATA_SOURCE=nse npm run dev:server
+
+# TRADL market-data gateway — live REST cold-load + WebSocket deltas (~250 ms
+# cadence). Greeks (delta / gamma / theta / vega) flow inline with the chain.
+DATA_SOURCE=tradl-gateway npm run dev:server
 ```
 
-Defaults to a realistic mock generator (NSE's endpoint sits behind Akamai bot protection). Both sources produce identical row shapes, so the engine exercises the same code paths.
+The TRADL gateway needs three env vars in `.env`:
+
+```
+TRADL_GATEWAY_BEARER=ak_live_...     # long-lived API key
+TRADL_GATEWAY_REST=http://<host>:9096
+TRADL_GATEWAY_WS=ws://<host>:9097/v1/stream
+```
+
+The bearer stays server-side; the browser never sees it. See [BACKEND_SCHEMA_PROPOSAL.md](BACKEND_SCHEMA_PROPOSAL.md) and [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md) for the wire contract; [FIELD_UNITS.ts](FIELD_UNITS.ts) is the machine-readable field spec.
+
+### Debug WebSocket frames
+
+When `DATA_SOURCE=tradl-gateway`, the server can dump every upstream frame (both directions) to stdout. Useful for "is the gateway sending what I expect" investigations.
+
+```bash
+# Dumps first 10 outbound + 10 inbound frames as pretty JSON, then summarizes.
+DATA_SOURCE=tradl-gateway TRADL_DEBUG=1 npm run dev:server
+
+# Tune the verbose-print threshold (default 10):
+TRADL_DEBUG=1 TRADL_DEBUG_VERBOSE_COUNT=50 npm run dev:server
+
+# Save frames to a file for grep / jq:
+TRADL_DEBUG=1 npm run dev:server 2>&1 | tee /tmp/tradl-frames.log
+grep '← RECV frame' /tmp/tradl-frames.log
+```
+
+The API key and short-lived ws-token live in REST `Authorization` headers and the WebSocket subprotocol respectively — **never in any frame payload** — so the dump is safe to share.
+
+Without `TRADL_DEBUG=1` the logger is a no-op (early return). Zero overhead in normal operation.
 
 ---
 
@@ -44,6 +82,45 @@ This project gives traders that authoring surface in the chain itself:
 - **Columns** show derived calculations alongside the raw data — built from a safe expression language over the raw fields.
 
 Everything runs against a live WebSocket feed and re-evaluates every tick, off the main thread.
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────┐                        ┌──────────────────────────┐
+│   browser (client)       │                        │   TRADL gateway (upstream)│
+│                          │                        │   :9096 REST · :9097 WS  │
+│   React + Web Worker     │                        │                          │
+│   AST eval, rule engine, │                        │                          │
+│   custom columns         │                        │                          │
+└────────────┬─────────────┘                        └────────────▲─────────────┘
+             │                                                   │
+             │ same-origin WS                                    │ ws subprotocol:
+             │ /ws/option-chain/:symbol                          │ bearer.<ws_token>
+             │ no creds in browser                               │
+             ▼                                                   │
+┌─────────────────────────────────────────────────────────────────┴─────────┐
+│   Node server (Express + ws)                                              │
+│                                                                            │
+│   • Holds the TRADL_GATEWAY_BEARER (ak_*). Never sent to browser.         │
+│   • Refcounted upstream WS per (symbol, expiry): one connection shared    │
+│     across N browser tabs.                                                 │
+│   • REST cold-load → seed snapshot. WS frames → merge by strike key.      │
+│     Race protection: drop frames whose asof ≤ cold-load timestamp.        │
+│   • Reconnect: exponential backoff 1s → 30s cap. Re-mints ws_token on     │
+│     close code 4401.                                                       │
+│   • Fans normalized OptionChainSnapshot to all subscribed browsers.       │
+│                                                                            │
+│   Other data sources behind the same fan-out:                             │
+│   • DATA_SOURCE=mock — synthetic generator, default.                      │
+│   • DATA_SOURCE=nse  — NSE REST poll every 60 s, Akamai-gated.            │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+The client's data model is intentionally flat (`call_oi`, `put_iv`, `call_delta`, …) — the rule engine, AST grammar, table render, and persisted user rules all assume this shape. The TRADL gateway emits a nested `ce` / `pe` payload with IV as a percent number; the server flattens at ingestion so the client model never had to change. New greek fields (`call_delta / call_gamma / call_theta / call_vega` and put equivalents) drop into `NUMERIC_FIELDS` and become rule-able / column-able with zero downstream code change.
+
+For wire-format details see [BACKEND_SCHEMA_PROPOSAL.md](BACKEND_SCHEMA_PROPOSAL.md) and [FRONTEND_INTEGRATION.md](FRONTEND_INTEGRATION.md). The companion [FIELD_UNITS.ts](FIELD_UNITS.ts) is the single source of truth for each field's unit, nullability, and example value.
 
 ---
 
