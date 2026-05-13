@@ -18,8 +18,10 @@ export interface DataStoreState {
 const ROW_FIELDS_TO_DIFF: ReadonlyArray<keyof OptionChainRow> = [
   'call_oi', 'call_oiChange', 'call_volume', 'call_iv', 'call_ltp',
   'call_netChange', 'call_bidQty', 'call_bidPrice', 'call_askQty', 'call_askPrice',
+  'call_delta', 'call_gamma', 'call_theta', 'call_vega',
   'put_oi', 'put_oiChange', 'put_volume', 'put_iv', 'put_ltp',
   'put_netChange', 'put_bidQty', 'put_bidPrice', 'put_askQty', 'put_askPrice',
+  'put_delta', 'put_gamma', 'put_theta', 'put_vega',
   'underlyingValue',
 ];
 

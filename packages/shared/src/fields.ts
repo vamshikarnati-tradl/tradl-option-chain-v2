@@ -12,6 +12,10 @@ export interface OptionChainRow {
   call_bidPrice: number;
   call_askQty: number;
   call_askPrice: number;
+  call_delta: number;
+  call_gamma: number;
+  call_theta: number;
+  call_vega: number;
 
   put_oi: number;
   put_oiChange: number;
@@ -23,6 +27,10 @@ export interface OptionChainRow {
   put_bidPrice: number;
   put_askQty: number;
   put_askPrice: number;
+  put_delta: number;
+  put_gamma: number;
+  put_theta: number;
+  put_vega: number;
 
   underlyingValue: number;
 }
@@ -33,6 +41,8 @@ export const NUMERIC_FIELDS: readonly NumericField[] = [
   'strikePrice', 'underlyingValue',
   'call_oi', 'call_oiChange', 'call_volume', 'call_iv', 'call_ltp', 'call_netChange',
   'call_bidQty', 'call_bidPrice', 'call_askQty', 'call_askPrice',
+  'call_delta', 'call_gamma', 'call_theta', 'call_vega',
   'put_oi', 'put_oiChange', 'put_volume', 'put_iv', 'put_ltp', 'put_netChange',
   'put_bidQty', 'put_bidPrice', 'put_askQty', 'put_askPrice',
+  'put_delta', 'put_gamma', 'put_theta', 'put_vega',
 ];

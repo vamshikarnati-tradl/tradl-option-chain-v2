@@ -120,6 +120,22 @@ function generateRow(
   const callSpread = Math.max(0.05, call_ltp * 0.005);
   const putSpread = Math.max(0.05, put_ltp * 0.005);
 
+  // Cheap analytical greeks. Not Black-Scholes precise — enough to exercise
+  // the rule engine and table display during dev. ITM call delta saturates
+  // toward 1, OTM toward 0; gamma peaks at ATM; theta scales with time value;
+  // vega scales with strike-to-spot proximity.
+  const moneynessCall = (spot - strike) / spot;       // +ve when ITM call
+  const moneynessPut  = (strike - spot) / spot;       // +ve when ITM put
+  const call_delta = clamp(0.5 + moneynessCall * 4, 0, 1);
+  const put_delta  = clamp(-(0.5 + moneynessPut * 4), -1, 0);
+  const gammaPeak  = Math.exp(-Math.pow((strike - spot) / spot, 2) * 80);
+  const call_gamma = Number((gammaPeak * 0.002).toFixed(6));
+  const put_gamma  = Number((gammaPeak * 0.002).toFixed(6));
+  const call_theta = Number((-callTV / Math.max(days, 1) * 1.1).toFixed(2));
+  const put_theta  = Number((-putTV  / Math.max(days, 1) * 1.1).toFixed(2));
+  const call_vega  = Number((spot * 0.01 * gammaPeak * 10).toFixed(2));
+  const put_vega   = Number((spot * 0.01 * gammaPeak * 10).toFixed(2));
+
   return {
     strikePrice: strike,
     expiryDate: state.expiryDate,
@@ -135,6 +151,10 @@ function generateRow(
     call_bidPrice: Number(Math.max(0.05, call_ltp - callSpread).toFixed(2)),
     call_askQty: Math.round(50 + Math.abs(gauss(0, 200))),
     call_askPrice: Number((call_ltp + callSpread).toFixed(2)),
+    call_delta: Number(call_delta.toFixed(3)),
+    call_gamma,
+    call_theta,
+    call_vega,
 
     put_oi,
     put_oiChange,
@@ -146,6 +166,10 @@ function generateRow(
     put_bidPrice: Number(Math.max(0.05, put_ltp - putSpread).toFixed(2)),
     put_askQty: Math.round(50 + Math.abs(gauss(0, 200))),
     put_askPrice: Number((put_ltp + putSpread).toFixed(2)),
+    put_delta: Number(put_delta.toFixed(3)),
+    put_gamma,
+    put_theta,
+    put_vega,
   };
 }
 

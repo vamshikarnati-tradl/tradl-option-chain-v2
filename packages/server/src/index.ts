@@ -11,6 +11,7 @@ import { buildSnapshot } from './data-transformer.js';
 import { buildMockSnapshot, getMockExpiries } from './mock-source.js';
 import { parseAi, AIValidationError, type AIParseRequest } from './ai-parse.js';
 import { setLatestSnapshot } from './snapshot-store.js';
+import { subscribeChain, fetchExpiriesViaTradl } from './tradl-source.js';
 import type { OptionChainSnapshot, WsServerMessage } from './types.js';
 
 // Keep the server alive when a downstream socket dies mid-write (EPIPE) or a
@@ -28,11 +29,21 @@ process.on('unhandledRejection', (reason) => {
   console.error('[server] unhandledRejection:', reason);
 });
 
+type DataSource = 'nse' | 'mock' | 'tradl-gateway';
+
 const PORT = Number(process.env.PORT ?? 4000);
-const DATA_SOURCE = (process.env.DATA_SOURCE ?? 'mock').toLowerCase() as 'nse' | 'mock';
+const DATA_SOURCE = (process.env.DATA_SOURCE ?? 'mock').toLowerCase() as DataSource;
 const DEFAULT_POLL = DATA_SOURCE === 'mock' ? 2_000 : 60_000;
 const POLL_INTERVAL_MS = Number(process.env.POLL_INTERVAL_MS ?? DEFAULT_POLL);
 const SUPPORTED_SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'];
+const TRADL_BEARER = process.env.TRADL_GATEWAY_BEARER ?? '';
+
+if (DATA_SOURCE === 'tradl-gateway' && !TRADL_BEARER) {
+  // Fail loud — don't silently fall back to mock when the operator opted into
+  // the gateway. They'd think they were seeing live data and not be.
+  console.error('[server] DATA_SOURCE=tradl-gateway requires TRADL_GATEWAY_BEARER to be set');
+  process.exit(1);
+}
 
 async function fetchSnapshot(symbol: string, expiryDate?: string): Promise<OptionChainSnapshot> {
   if (DATA_SOURCE === 'nse') {
@@ -43,6 +54,7 @@ async function fetchSnapshot(symbol: string, expiryDate?: string): Promise<Optio
 }
 
 async function listExpiries(symbol: string): Promise<string[]> {
+  if (DATA_SOURCE === 'tradl-gateway') return fetchExpiriesViaTradl(symbol, TRADL_BEARER);
   if (DATA_SOURCE === 'nse') return fetchExpiries(symbol);
   return getMockExpiries(symbol);
 }
@@ -55,7 +67,11 @@ interface SymbolState {
   latest: OptionChainSnapshot | null;
   latestError: string | null;
   subscribers: Set<WebSocket>;
+  // setInterval handle for the mock/nse poll loop. null for tradl-gateway.
   pollHandle: NodeJS.Timeout | null;
+  // Refcounted unsubscribe callback returned by `subscribeChain` from the
+  // TRADL upstream WS manager. null for mock/nse.
+  streamStop: (() => void) | null;
 }
 
 const state = new Map<string, SymbolState>();
@@ -63,46 +79,90 @@ const state = new Map<string, SymbolState>();
 function getState(symbol: string): SymbolState {
   let s = state.get(symbol);
   if (!s) {
-    s = { latest: null, latestError: null, subscribers: new Set(), pollHandle: null };
+    s = {
+      latest: null, latestError: null,
+      subscribers: new Set(),
+      pollHandle: null,
+      streamStop: null,
+    };
     state.set(symbol, s);
   }
   return s;
 }
 
-async function pollOnce(symbol: string, expiryDate?: string): Promise<void> {
+function handleSnapshot(symbol: string, snapshot: OptionChainSnapshot): void {
   const s = getState(symbol);
+  s.latest = snapshot;
+  s.latestError = null;
+  setLatestSnapshot(symbol, snapshot);
+  broadcast(symbol, { type: 'snapshot', payload: snapshot });
+}
+
+function handleSourceError(symbol: string, err: unknown): void {
+  const s = getState(symbol);
+  const message = err instanceof Error ? err.message : String(err);
+  s.latestError = message;
+  console.error(`[${symbol}] data source error: ${message}`);
+  broadcast(symbol, { type: 'error', message });
+}
+
+async function pollOnce(symbol: string, expiryDate?: string): Promise<void> {
   try {
     const snapshot = await fetchSnapshot(symbol, expiryDate);
-    s.latest = snapshot;
-    s.latestError = null;
-    setLatestSnapshot(symbol, snapshot);
-    broadcast(symbol, { type: 'snapshot', payload: snapshot });
+    handleSnapshot(symbol, snapshot);
     console.log(
       `[${symbol}] snapshot ${snapshot.rows.length} strikes, expiry ${snapshot.expiryDate}, spot ${snapshot.underlyingValue}`,
     );
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    s.latestError = message;
-    console.error(`[${symbol}] poll failed: ${message}`);
-    broadcast(symbol, { type: 'error', message });
+    handleSourceError(symbol, err);
   }
 }
 
-function startPolling(symbol: string): void {
+async function startStream(symbol: string): Promise<void> {
   const s = getState(symbol);
-  if (s.pollHandle) return;
+  if (s.pollHandle || s.streamStop) return;
+
+  if (DATA_SOURCE === 'tradl-gateway') {
+    // Pick the nearest available expiry. Future: let clients pass an expiry
+    // hint on subscribe.
+    let expiry: string;
+    try {
+      const expiries = await fetchExpiriesViaTradl(symbol, TRADL_BEARER);
+      if (!expiries.length) throw new Error('no expiries available');
+      expiry = expiries[0];
+    } catch (err) {
+      handleSourceError(symbol, err);
+      return;
+    }
+    s.streamStop = subscribeChain({
+      symbol,
+      expiry,
+      bearer: TRADL_BEARER,
+      onSnapshot: (snap) => handleSnapshot(symbol, snap),
+      onError:    (err)  => handleSourceError(symbol, err),
+    });
+    console.log(`[${symbol}] streaming from tradl-gateway, expiry ${expiry}`);
+    return;
+  }
+
+  // mock / nse — poll loop.
   void pollOnce(symbol);
   s.pollHandle = setInterval(() => void pollOnce(symbol), POLL_INTERVAL_MS);
   console.log(`[${symbol}] polling started @ ${POLL_INTERVAL_MS}ms`);
 }
 
-function stopPollingIfIdle(symbol: string): void {
+function stopStreamIfIdle(symbol: string): void {
   const s = state.get(symbol);
   if (!s || s.subscribers.size > 0) return;
   if (s.pollHandle) {
     clearInterval(s.pollHandle);
     s.pollHandle = null;
     console.log(`[${symbol}] polling stopped (no subscribers)`);
+  }
+  if (s.streamStop) {
+    s.streamStop();
+    s.streamStop = null;
+    console.log(`[${symbol}] stream stopped (no subscribers)`);
   }
 }
 
@@ -230,12 +290,12 @@ wss.on('connection', (ws: WebSocket, _req: IncomingMessage, symbol: string) => {
     ws.send(JSON.stringify({ type: 'error', message: s.latestError } satisfies WsServerMessage));
   }
 
-  startPolling(symbol);
+  void startStream(symbol);
 
   ws.on('close', () => {
     s.subscribers.delete(ws);
     console.log(`[${symbol}] ws disconnected (subs=${s.subscribers.size})`);
-    stopPollingIfIdle(symbol);
+    stopStreamIfIdle(symbol);
   });
 
   ws.on('error', (err) => {
