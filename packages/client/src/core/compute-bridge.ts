@@ -2,7 +2,8 @@
 // Owns the worker lifecycle and exposes a typed API.
 
 import type {
-  ColumnResult, CustomColumnDefinition, OptionChainRow, RuleDefinition, RuleResult,
+  ColumnResult, CustomColumnDefinition,
+  OptionChainRow, RuleDefinition, RuleResult,
 } from './types';
 
 export interface ComputeStats {
@@ -22,6 +23,8 @@ export interface ComputeOutput {
 export interface ConfigErrors {
   ruleErrors: { ruleId: string; error: string }[];
   columnErrors: { columnId: string; error: string }[];
+  /** Column dependency cycles detected during topo-sort (column-name traces). */
+  cycleErrors: string[];
 }
 
 type Listener<T> = (v: T) => void;
@@ -51,7 +54,11 @@ export class ComputeBridge {
       };
       for (const l of this.resultListeners) l(out);
     } else if (msg?.type === 'CONFIG_ERRORS') {
-      for (const l of this.errorListeners) l({ ruleErrors: msg.ruleErrors, columnErrors: msg.columnErrors });
+      for (const l of this.errorListeners) l({
+        ruleErrors: msg.ruleErrors,
+        columnErrors: msg.columnErrors,
+        cycleErrors: msg.cycleErrors ?? [],
+      });
     }
   }
 

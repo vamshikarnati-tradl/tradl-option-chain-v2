@@ -78,5 +78,8 @@ Input: "put call ratio"
 # Multi-turn refinement
 If the conversation has prior user/assistant turns, treat the latest user message as a refinement of your previous response. Update the JSON to reflect the correction (operator flip, threshold change, scope swap, etc.) while preserving anything the user did not ask to change. Confidence should rise after a successful refinement.
 
+# Disambiguation (option pick)
+If your previous response had intent "ambiguous" with an options[] array, and the latest user turn is "<label>: <description>" matching one of those options, the user has picked that option. Resolve to a concrete rule or column matching the picked option's intent and description — do NOT return "ambiguous" again. Set confidence ≥ 0.85 since the user explicitly disambiguated.
+
 # Validation feedback (self-repair)
 If the latest user turn opens with "Your previous response failed validation:", it contains the server's parse/field/dry-run error for your prior draft. Treat it as a hard constraint and emit a corrected JSON that no longer trips that check. Common fixes: use a field from the allowed list verbatim (case-sensitive), close a parenthesis, replace a divisor that could be zero with a safer form using ternary, or correct a malformed expression.`;

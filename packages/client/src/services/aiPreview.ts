@@ -3,9 +3,11 @@
 // because the parsed rule isn't committed yet.
 
 import { compileRule, evaluateCompiledRule } from '../core/rule-engine';
-import { extractDependencies, parseExpression } from '../core/expression-parser';
+import { extractDependencies } from '../core/expression-parser';
 import { evaluate } from '../core/expression-evaluator';
-import type { OptionChainRow, RuleDefinition } from '../core/types';
+import { parseAndResolve } from '../core/parse-and-resolve';
+import type { CustomColumnDefinition, OptionChainRow, RuleDefinition } from '../core/types';
+import { parseExpressionLoose, resolveColumnRefs, type Expr } from '@tradl/shared';
 
 export interface DryRunRule {
   matches: number;
@@ -13,10 +15,19 @@ export interface DryRunRule {
   error?: string;
 }
 
-export function dryRunRule(rule: RuleDefinition, rows: OptionChainRow[]): DryRunRule {
+const EMPTY_COLUMNS_BY_NAME = new Map<string, CustomColumnDefinition>();
+
+export function dryRunRule(
+  rule: RuleDefinition,
+  rows: OptionChainRow[],
+  columns: CustomColumnDefinition[] = [],
+): DryRunRule {
   if (!rows.length) return { matches: 0, total: 0 };
   try {
-    const compiled = compileRule(rule);
+    const columnsByName = columns.length
+      ? new Map(columns.map((c) => [c.name, c]))
+      : EMPTY_COLUMNS_BY_NAME;
+    const compiled = compileRule(rule, columnsByName);
     const result = evaluateCompiledRule(compiled, rows);
     return { matches: result.matches.length, total: rows.length };
   } catch (err) {
@@ -32,14 +43,19 @@ export interface ColumnSample {
 }
 
 // Returns up to 3 sample evaluations: one strike below ATM, ATM, one above.
+// Accepts optional `columns` so the expression can reference saved columns
+// (e.g. `maxPainLevel * 100`). Each referenced column's compiled AST is
+// passed via the eval context so the evaluator's live-eval fallback can
+// resolve it recursively without precomputed values.
 export function dryRunColumn(
   expression: string,
   rows: OptionChainRow[],
+  columns: CustomColumnDefinition[] = [],
 ): ColumnSample[] {
   if (!rows.length) return [];
   let ast;
   try {
-    ast = parseExpression(expression);
+    ast = parseAndResolve(expression, columns);
     extractDependencies(ast);
   } catch (err) {
     return [{
@@ -47,6 +63,17 @@ export function dryRunColumn(
       value: null,
       error: err instanceof Error ? err.message : String(err),
     }];
+  }
+
+  // Pre-resolve every column so the evaluator's columnRef fallback can
+  // walk them recursively. Broken columns are skipped — their downstream
+  // references will resolve to NaN.
+  const compiledColumns = new Map<string, Expr>();
+  const byName = new Map(columns.map((c) => [c.name, c]));
+  for (const col of columns) {
+    try {
+      compiledColumns.set(col.id, resolveColumnRefs(parseExpressionLoose(col.expression), byName));
+    } catch { /* skip */ }
   }
 
   const spot = rows[0].underlyingValue;
@@ -63,7 +90,7 @@ export function dryRunColumn(
   return indices.map((i): ColumnSample => {
     const row = rows[i];
     try {
-      const v = evaluate(ast!, row);
+      const v = evaluate(ast!, row, { snapshot: rows, compiledColumns });
       return {
         strikePrice: row.strikePrice,
         value: Number.isFinite(v) ? v : null,

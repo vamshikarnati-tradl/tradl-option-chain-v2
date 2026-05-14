@@ -346,3 +346,462 @@ body.theme-paper .bg-accent,
 body.theme-frost .bg-accent { color: #ffffff !important; }
 body.theme-paper .bg-accent kbd,
 body.theme-frost .bg-accent kbd { color: rgba(255, 255, 255, 0.85) !important; background-color: rgba(0, 0, 0, 0.15) !important; }
+
+/* ─────────────── EXPRESSION TOKENS & PILLS ─────────────── */
+/* Custom properties drive both the textarea overlay (Expression Mode) and
+   the visual renderer (Visual Mode). Defaults below are the dark-theme
+   palette (Clean / Terminal); Paper / Frost overrides follow. */
+
+:root {
+  /* Bracket rainbow — depth 0, 1, 2 cycling. */
+  --bracket-0: #60a5fa;
+  --bracket-1: #fbbf24;
+  --bracket-2: #f472b6;
+  /* Token colors */
+  --token-num:           #86efac;
+  --token-duration:      #94a3b8;
+  --token-string:        #fcd34d;
+  --token-const:         #a78bfa;
+  --token-op-compare:    #c4b5fd;
+  --token-op-logical:    #fbbf24;
+  --token-op-arith:      #94a3b8;
+  --token-field-call:    #f0abfc;
+  --token-field-put:     #67e8f9;
+  --token-field-market:  #d1d5db;
+  --token-fn-math:       #93c5fd;
+  --token-fn-logic:      #fcd34d;
+  --token-fn-crossStrike: #fda4af;
+  --token-fn-recentHistory: #fdba74;
+  --token-fn-pastDays:   #d8b4fe;
+  /* Visual mode pill backgrounds (depth gradient) */
+  --expr-fn-bg-0: rgba(56, 75, 110, 0.45);
+  --expr-fn-bg-1: rgba(78, 100, 140, 0.55);
+  --expr-fn-bg-2: rgba(102, 128, 170, 0.65);
+  --expr-fn-bg-3: rgba(130, 158, 200, 0.75);
+  --expr-fn-border: rgba(255, 255, 255, 0.06);
+  --expr-fn-label-fg: #67e8f9;
+  --expr-fn-label-bg: rgba(103, 232, 249, 0.10);
+  --expr-num-fg: #86efac;
+  --expr-num-bg: rgba(134, 239, 172, 0.10);
+  --expr-num-border: rgba(134, 239, 172, 0.22);
+  --expr-compare-fg: #ddd6fe;
+  --expr-compare-bg: rgba(167, 139, 250, 0.20);
+  --expr-compare-border: rgba(167, 139, 250, 0.40);
+  --expr-logical-fg: #fbbf24;
+  --expr-logical-bg: rgba(251, 191, 36, 0.18);
+  --expr-logical-border: rgba(251, 191, 36, 0.45);
+  --expr-arith-fg: #94a3b8;
+  --expr-comma: #64748b;
+}
+
+/* ── Expression editor (textarea + overlay) ──
+   The textarea sits *over* the colored token overlay. The textarea is fully
+   transparent (background + text); only the caret and selection render from
+   it. The opaque editor surface lives on the wrapping `.expr-editor` so the
+   overlay's token colors render at 100% (no see-through tint). */
+.expr-editor {
+  position: relative;
+  background: #0e1014;
+  border: 1px solid #2a3038;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.expr-editor:focus-within { border-color: #6ea8ff; }
+.expr-editor-overlay {
+  position: absolute; inset: 0;
+  margin: 0;
+  padding: 0.5rem 0.625rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  pointer-events: none;
+  color: #e6e8eb;
+  overflow: hidden;
+}
+.expr-editor-overlay > * { pointer-events: auto; }
+.expr-editor-textarea {
+  position: relative;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  padding: 0.5rem 0.625rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: transparent;
+  caret-color: #e6e8eb;
+  resize: vertical;
+  outline: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.expr-editor-textarea::selection { background: rgba(110, 168, 255, 0.30); color: transparent; }
+
+/* Token coloring inside the overlay */
+.expr-tok-num          { color: var(--token-num); font-weight: 600; }
+.expr-tok-num-active   { outline: 1px solid #6ea8ff; outline-offset: 1px; border-radius: 2px; }
+.expr-tok-clickable    { cursor: pointer; }
+.expr-tok-duration     { color: var(--token-duration); font-weight: 500; }
+.expr-tok-str          { color: var(--token-string); }
+.expr-tok-const        { color: var(--token-const); }
+.expr-tok-op-compare   { color: var(--token-op-compare); font-weight: 600; }
+.expr-tok-op-logical   { color: var(--token-op-logical); font-weight: 600; }
+.expr-tok-op-arith     { color: var(--token-op-arith); }
+.expr-tok-field-call   { color: var(--token-field-call); }
+.expr-tok-field-put    { color: var(--token-field-put); }
+.expr-tok-field-market { color: var(--token-field-market); }
+.expr-tok-fn-math           { color: var(--token-fn-math); font-style: italic; }
+.expr-tok-fn-logic          { color: var(--token-fn-logic); font-style: italic; }
+.expr-tok-fn-crossStrike    { color: var(--token-fn-crossStrike); font-style: italic; }
+.expr-tok-fn-recentHistory  { color: var(--token-fn-recentHistory); font-style: italic; }
+.expr-tok-fn-pastDays       { color: var(--token-fn-pastDays); font-style: italic; }
+.expr-tok-bracket { font-weight: 700; }
+.expr-bracket-0 { color: var(--bracket-0); }
+.expr-bracket-1 { color: var(--bracket-1); }
+.expr-bracket-2 { color: var(--bracket-2); }
+.expr-error-char {
+  background: rgba(248, 113, 113, 0.35);
+  border-radius: 2px;
+  color: #fecaca;
+}
+
+/* ── Visual mode pills ── */
+.expr-view {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #e6e8eb;
+  /* Allow the view to shrink to its container instead of forcing horizontal
+     overflow when nested pills get long. Combined with `flex-wrap: wrap`
+     on every interior row, pills break onto new lines only when they don't
+     fit — pure flex behavior, no JS measurement. */
+  min-width: 0;
+  max-width: 100%;
+}
+.expr-view-compact { font-size: 11px; gap: 4px; line-height: 1.3; }
+.expr-row,
+.expr-row-gap,
+.expr-row-wrap {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+}
+.expr-row-gap { gap: 6px; }
+.expr-row-wrap { gap: 8px; }
+.expr-logical-stack { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; max-width: 100%; }
+.expr-logical-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; }
+.expr-logical-spacer { display: inline-block; width: 30px; }
+
+.expr-fn-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 5px 7px;
+  border-radius: 8px;
+  border: 1px solid var(--expr-fn-border);
+  /* Wrap children (label + args) onto new lines when they don't fit the
+     parent's width. The function-name label stays nowrap so it never splits;
+     args break between themselves at commas. */
+  flex-wrap: wrap;
+  min-width: 0;
+  max-width: 100%;
+  row-gap: 4px;
+}
+.expr-fn-depth-0 { background: var(--expr-fn-bg-0); box-shadow: inset 0 1px 0 rgba(255,255,255,0.04); }
+.expr-fn-depth-1 { background: var(--expr-fn-bg-1); }
+.expr-fn-depth-2 { background: var(--expr-fn-bg-2); }
+.expr-fn-depth-3 { background: var(--expr-fn-bg-3); }
+.expr-fn-label {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--expr-fn-label-fg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--expr-fn-label-bg);
+  white-space: nowrap;
+}
+.expr-view-compact .expr-fn-label { font-size: 8.5px; padding: 1px 4px; }
+
+.expr-num {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--expr-num-fg);
+  background: var(--expr-num-bg);
+  border: 1px solid var(--expr-num-border);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+.expr-view-compact .expr-num { font-size: 11px; padding: 1px 5px; }
+.expr-num-clickable { cursor: pointer; }
+.expr-num-clickable:hover { background: rgba(134, 239, 172, 0.20); }
+.expr-num-active {
+  outline: 2px solid #6ea8ff;
+  outline-offset: 1px;
+}
+.expr-num:disabled { cursor: default; }
+
+.expr-compare {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--expr-compare-fg);
+  background: var(--expr-compare-bg);
+  border: 1px solid var(--expr-compare-border);
+  border-radius: 5px;
+  padding: 2px 8px;
+}
+
+.expr-logical {
+  display: inline-flex; align-items: center; justify-content: center;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--expr-logical-fg);
+  background: var(--expr-logical-bg);
+  border: 1px solid var(--expr-logical-border);
+  border-radius: 6px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+.expr-arith-op { color: var(--expr-arith-fg); padding: 0 3px; }
+.expr-comma { color: var(--expr-comma); opacity: 0.6; padding: 0 2px; }
+
+.expr-var {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  letter-spacing: -0.01em;
+}
+.expr-view-compact .expr-var { font-size: 11px; }
+.expr-var-callSide { color: var(--token-field-call); }
+.expr-var-putSide  { color: var(--token-field-put); }
+.expr-var-market   { color: var(--token-field-market); }
+.expr-var-muted    { opacity: 0.75; }
+
+.expr-const {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--token-const);
+  background: rgba(167, 139, 250, 0.10);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.expr-duration {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--token-duration);
+  background: rgba(148, 163, 184, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.expr-string {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--token-string);
+  background: rgba(252, 211, 77, 0.12);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+
+.expr-view-wrapper {
+  padding: 12px;
+  background: rgba(14, 16, 20, 0.6);
+  border: 1px solid #2a3038;
+  border-radius: 6px;
+  min-height: 60px;
+}
+
+/* ── Paper / Frost overrides ── */
+body.theme-paper, body.theme-frost {
+  --bracket-0: #2563eb;
+  --bracket-1: #b45309;
+  --bracket-2: #be185d;
+  --token-num:           #166534;
+  --token-duration:      #475569;
+  --token-string:        #92400e;
+  --token-const:         #6b21a8;
+  --token-op-compare:    #6d28d9;
+  --token-op-logical:    #b45309;
+  --token-op-arith:      #475569;
+  --token-field-call:    #a21caf;
+  --token-field-put:     #0e7490;
+  --token-field-market:  #334155;
+  --token-fn-math:       #1e40af;
+  --token-fn-logic:      #92400e;
+  --token-fn-crossStrike: #be123c;
+  --token-fn-recentHistory: #c2410c;
+  --token-fn-pastDays:   #7c3aed;
+  --expr-fn-bg-0: rgba(229, 231, 235, 0.7);
+  --expr-fn-bg-1: rgba(209, 213, 219, 0.7);
+  --expr-fn-bg-2: rgba(180, 183, 191, 0.7);
+  --expr-fn-bg-3: rgba(150, 153, 161, 0.7);
+  --expr-fn-border: rgba(0, 0, 0, 0.10);
+  --expr-fn-label-fg: #0e7490;
+  --expr-fn-label-bg: rgba(14, 116, 144, 0.10);
+  --expr-num-fg: #166534;
+  --expr-num-bg: rgba(22, 101, 52, 0.08);
+  --expr-num-border: rgba(22, 101, 52, 0.20);
+  --expr-compare-fg: #6d28d9;
+  --expr-compare-bg: rgba(109, 40, 217, 0.10);
+  --expr-compare-border: rgba(109, 40, 217, 0.30);
+  --expr-logical-fg: #b45309;
+  --expr-logical-bg: rgba(180, 83, 9, 0.10);
+  --expr-logical-border: rgba(180, 83, 9, 0.35);
+  --expr-arith-fg: #475569;
+  --expr-comma: #94a3b8;
+}
+body.theme-paper .expr-editor,
+body.theme-frost .expr-editor {
+  background: #ffffff;
+  border-color: rgba(0, 0, 0, 0.15);
+}
+body.theme-paper .expr-editor:focus-within,
+body.theme-frost .expr-editor:focus-within {
+  border-color: #2563eb;
+}
+body.theme-paper .expr-editor-textarea,
+body.theme-frost .expr-editor-textarea {
+  caret-color: #1c1d1f;
+}
+body.theme-paper .expr-editor-overlay,
+body.theme-frost .expr-editor-overlay {
+  color: #1c1d1f;
+}
+body.theme-paper .expr-view,
+body.theme-frost .expr-view {
+  color: #1c1d1f;
+}
+body.theme-paper .expr-view-wrapper,
+body.theme-frost .expr-view-wrapper {
+  background: rgba(255, 255, 255, 0.6);
+  border-color: rgba(0, 0, 0, 0.15);
+}
+
+/* ── Light-theme picker text contrast ──
+   On Paper/Frost the dark-theme token colors wash out against white. Bump
+   the token foregrounds to saturated dark values + medium weight so they
+   read as clearly as the dark theme's bright tokens do on black. No chip
+   backgrounds — matches the rest of the modal's flat aesthetic. */
+body.theme-paper, body.theme-frost {
+  --token-num:           #15803d;
+  --token-duration:      #334155;
+  --token-string:        #b45309;
+  --token-const:         #6d28d9;
+  --token-op-compare:    #6d28d9;
+  --token-op-logical:    #b45309;
+  --token-op-arith:      #334155;
+  --token-field-call:    #be185d;
+  --token-field-put:     #0369a1;
+  --token-field-market:  #1e293b;
+  --token-fn-math:       #1d4ed8;
+  --token-fn-logic:      #b45309;
+  --token-fn-crossStrike: #be123c;
+  --token-fn-recentHistory: #c2410c;
+  --token-fn-pastDays:   #7c3aed;
+  --bracket-0: #1d4ed8;
+  --bracket-1: #b45309;
+  --bracket-2: #be185d;
+}
+
+/* Pickered <code> entries get medium-weight saturated text on light themes.
+   Targets <code class="expr-tok-*"> specifically so the Expression-Mode
+   overlay (which uses <span>) isn't affected. */
+body.theme-paper code.expr-tok-fn-math,        body.theme-frost code.expr-tok-fn-math        { font-weight: 600; }
+body.theme-paper code.expr-tok-fn-logic,       body.theme-frost code.expr-tok-fn-logic       { font-weight: 600; }
+body.theme-paper code.expr-tok-fn-crossStrike, body.theme-frost code.expr-tok-fn-crossStrike { font-weight: 600; }
+body.theme-paper code.expr-tok-fn-recentHistory, body.theme-frost code.expr-tok-fn-recentHistory { font-weight: 600; }
+body.theme-paper code.expr-tok-fn-pastDays,    body.theme-frost code.expr-tok-fn-pastDays    { font-weight: 600; }
+body.theme-paper code.expr-tok-field-callSide, body.theme-frost code.expr-tok-field-callSide { font-weight: 600; }
+body.theme-paper code.expr-tok-field-putSide,  body.theme-frost code.expr-tok-field-putSide  { font-weight: 600; }
+body.theme-paper code.expr-tok-field-market,   body.theme-frost code.expr-tok-field-market   { font-weight: 600; }
+body.theme-paper code.expr-tok-const,          body.theme-frost code.expr-tok-const          { font-weight: 600; }
+
+/* Cross-strike field reads — italic + slight desaturation to mark
+   "this reads from the strike being iterated over, not the current row." */
+.expr-tok-cross-field-call,
+.expr-tok-cross-field-put,
+.expr-tok-cross-field-market {
+  font-style: italic;
+  opacity: 0.85;
+}
+.expr-tok-cross-field-call   { color: var(--token-field-call); }
+.expr-tok-cross-field-put    { color: var(--token-field-put); }
+.expr-tok-cross-field-market { color: var(--token-field-market); }
+
+.expr-var-cross { font-style: italic; opacity: 0.85; }
+
+/* ── Column references ──
+   Saved columns inserted into other expressions render with a distinct
+   "your column" accent (amber-leaning gold in the dark themes, deeper
+   ochre on light) so users see at a glance which idents are derived data
+   vs raw fields. Cross-column variants get the same treatment as
+   cross-field — italic + slight muting. */
+:root {
+  --token-column: #fbbf24;
+  --expr-column-fg: #fbbf24;
+  --expr-column-bg: rgba(251, 191, 36, 0.12);
+  --expr-column-border: rgba(251, 191, 36, 0.30);
+}
+
+body.theme-paper, body.theme-frost {
+  --token-column: #b45309;
+  --expr-column-fg: #b45309;
+  --expr-column-bg: rgba(180, 83, 9, 0.10);
+  --expr-column-border: rgba(180, 83, 9, 0.30);
+}
+
+.expr-tok-column { color: var(--token-column); font-weight: 600; }
+.expr-tok-cross-column {
+  color: var(--token-column);
+  font-weight: 600;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* Visual Mode pill for `columnRef` */
+.expr-column {
+  display: inline-flex; align-items: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--expr-column-fg);
+  background: var(--expr-column-bg);
+  border: 1px solid var(--expr-column-border);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.expr-view-compact .expr-column { font-size: 10.5px; padding: 1px 5px; }
+.expr-column-cross { font-style: italic; opacity: 0.85; }
+
+/* Unresolved identifier pill — bright warning so users notice typos. */
+.expr-unresolved {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.10);
+  border: 1px solid rgba(248, 113, 113, 0.30);
+  border-radius: 4px;
+  padding: 1px 5px;
+  text-decoration: underline dotted;
+}

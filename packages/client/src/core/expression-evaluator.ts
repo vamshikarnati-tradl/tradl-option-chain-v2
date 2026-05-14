@@ -1,1 +1,4 @@
-export { evaluate, evaluateWithTrace, formatExpr, type EvalTrace } from '@tradl/shared';
+export {
+  evaluate, evaluateWithTrace, formatExpr,
+  type EvalTrace, type EvalContext,
+} from '@tradl/shared';

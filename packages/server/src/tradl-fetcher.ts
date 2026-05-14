@@ -119,6 +119,7 @@ export function envelopeToSnapshot(env: TradlChainEnvelope): OptionChainSnapshot
     underlyingValue,
     fetchedAt: env.asof ?? Date.now(),
     rows,
+    source: 'tradl-gateway',
   };
 }
 

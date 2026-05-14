@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 import { ComputeEngine } from '../core/compute-engine';
-import type { OptionChainRow, RuleDefinition, CustomColumnDefinition } from '../core/types';
+import type {
+  OptionChainRow, RuleDefinition, CustomColumnDefinition,
+} from '../core/types';
 
 type In =
   | { type: 'UPDATE_DATA'; rows: OptionChainRow[] }
@@ -18,7 +20,13 @@ type Out =
       totalCells: number;
       computedAt: number;
     }
-  | { type: 'CONFIG_ERRORS'; ruleErrors: { ruleId: string; error: string }[]; columnErrors: { columnId: string; error: string }[] };
+  | {
+      type: 'CONFIG_ERRORS';
+      ruleErrors: { ruleId: string; error: string }[];
+      columnErrors: { columnId: string; error: string }[];
+      /** Cycle traces from column topo-sort (e.g. `"maxPain → painProxy → maxPain"`). */
+      cycleErrors: string[];
+    };
 
 const engine = new ComputeEngine();
 let lastRows: OptionChainRow[] | null = null;
@@ -51,13 +59,13 @@ self.onmessage = (e: MessageEvent<In>) => {
       break;
     case 'SET_RULES': {
       const { errors } = engine.setRules(msg.rules);
-      postOut({ type: 'CONFIG_ERRORS', ruleErrors: errors, columnErrors: [] });
+      postOut({ type: 'CONFIG_ERRORS', ruleErrors: errors, columnErrors: [], cycleErrors: [] });
       compute();
       break;
     }
     case 'SET_COLUMNS': {
-      const { errors } = engine.setColumns(msg.columns);
-      postOut({ type: 'CONFIG_ERRORS', ruleErrors: [], columnErrors: errors });
+      const { errors, cycleErrors } = engine.setColumns(msg.columns);
+      postOut({ type: 'CONFIG_ERRORS', ruleErrors: [], columnErrors: errors, cycleErrors });
       compute();
       break;
     }

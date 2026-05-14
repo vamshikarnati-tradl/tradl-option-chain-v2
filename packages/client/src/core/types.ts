@@ -2,12 +2,15 @@ import type { OptionChainRow, NumericField } from '@tradl/shared';
 export type { OptionChainRow, NumericField } from '@tradl/shared';
 export { NUMERIC_FIELDS } from '@tradl/shared';
 
+export type SnapshotSource = 'tradl-gateway' | 'nse' | 'mock';
+
 export interface OptionChainSnapshot {
   symbol: string;
   expiryDate: string;
   underlyingValue: number;
   fetchedAt: number;
   rows: OptionChainRow[];
+  source: SnapshotSource;
 }
 
 export type WsServerMessage =
@@ -15,44 +18,24 @@ export type WsServerMessage =
   | { type: 'error'; message: string };
 
 // ───── Rules ─────
+//
+// A rule is a single boolean-rooted expression. The AST is the source of
+// truth — the engine parses, validates that the root produces true/false,
+// and evaluates per row. Cells get tinted by the rule's hue iff the rule
+// matched on that row; tint is applied only to the cells whose fields the
+// evaluator actually read (via evaluateWithTrace, which respects
+// short-circuit and ternary branch selection).
 
-export type Operator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'between';
-
-// LHS is either a single field (fast path) or a free expression.
-export type ConditionLhs =
-  | { kind: 'field'; field: NumericField }
-  | { kind: 'expr'; expression: string };
-
-// RHS is a literal number, a field reference, an expression, or a range (for `between`).
-export type ConditionRhs =
-  | { kind: 'literal'; value: number }
-  | { kind: 'field'; field: NumericField }
-  | { kind: 'expr'; expression: string }
-  | { kind: 'range'; value: [number, number] };
-
-export interface Condition {
-  lhs: ConditionLhs;
-  operator: Operator;
-  rhs: ConditionRhs;
-}
-
-export interface RuleStyle {
-  // HSL hue (0–360) — canonical color for the rule. The renderer derives
-  // bg/border/swatch from this with a fixed saturation+lightness.
-  hue: number;
-  scope: 'call' | 'put' | 'row';
-  icon?: string;
-}
-
-// Optional slider metadata — when present, the rule editor exposes a slider
-// that mutates the rhs literal of the condition at `conditionIndex`. Lets
-// non-technical users tune predefined rules without touching the conditions.
+/** Optional slider that binds to one numeric literal inside the expression. */
 export interface RuleSlider {
-  conditionIndex: number;     // which condition the slider controls (default 0)
+  /** Character position in `expression` of the bound literal. For a unary-minus
+   *  literal (e.g. `-5000`), this points at the `-`, and the slider spans the
+   *  whole `-N` substring. */
+  literalOffset: number;
   min: number;
   max: number;
   step: number;
-  label: string;
+  label?: string;
 }
 
 export interface RuleDefinition {
@@ -60,21 +43,24 @@ export interface RuleDefinition {
   name: string;
   description?: string;
   enabled: boolean;
-  logic: 'AND' | 'OR';
-  conditions: Condition[];
-  style: RuleStyle;
-  tooltip?: string;
+  /** Single expression whose AST root must evaluate to boolean. */
+  expression: string;
+  /** HSL hue 0..360 for the tint color. */
+  hue: number;
   slider?: RuleSlider;
 }
 
 export interface RuleMatch {
   strikePrice: number;
-  matchedConditionIndices: number[];
-  // Union of NumericField deps across the conditions that matched. Drives
-  // per-cell tinting: a cell at (strike, field) is tinted by this rule iff
-  // `field` appears here. Empty array means the rule's coloring should not
-  // be cell-scoped (defensive — should not happen for any predicate).
+  /** Raw fields actually read on the outer row while evaluating this rule.
+   *  Drives per-cell tinting: a cell at (strike, field) is tinted iff
+   *  `field` appears here. Respects `||`/`&&` short-circuit + ternary
+   *  branch selection. */
   affectedFields: NumericField[];
+  /** Saved-column ids referenced by the rule on the outer row. Drives the
+   *  column-cell tint: the custom-column cell at this strike picks up the
+   *  rule's hue. Mirrors `affectedFields` for column references. */
+  affectedColumns: string[];
 }
 
 export interface RuleResult {
@@ -94,7 +80,13 @@ export interface ColumnFormat {
 
 export interface CustomColumnDefinition {
   id: string;
+  /** Validated identifier (snake/camelCase, no spaces). Doubles as the symbol
+   *  this column is referenced by inside other expressions. */
   name: string;
+  /** Optional free-form label shown in the table header + picker + visual
+   *  pill. When absent, falls back to `name`. */
+  displayLabel?: string;
+  description?: string;
   expression: string;
   format: ColumnFormat;
   side: 'call' | 'put' | 'general';   // which side of the table to render under

@@ -4,7 +4,7 @@
 // — so what we accept here is what will actually execute.
 
 import {
-  NUMERIC_FIELDS, evaluate, extractDependencies, parseExpression,
+  NUMERIC_FIELDS, evaluate, extractDependencies, parseExpression, returnsBoolean,
   type NumericField, type OptionChainRow,
 } from '@tradl/shared';
 
@@ -122,4 +122,84 @@ function validateSide(side: ParsedConditionSide, where: string, sample: OptionCh
 // call sites that need NumericField).
 export function isNumericField(name: string): name is NumericField {
   return ALLOWED.has(name);
+}
+
+/**
+ * Validate a single-expression rule (new shape). Parses, checks fields,
+ * requires a boolean root, and dry-runs against the sample row if provided.
+ */
+export function validateBooleanExpression(
+  expr: string, sampleRow: OptionChainRow | null,
+): ValidationResult {
+  if (!expr?.trim()) return fail('Expression is empty', 'The rule needs a non-empty expression.');
+  let ast;
+  try {
+    ast = parseExpression(expr);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return fail(`Syntax error: ${msg}`, `Failed to parse "${expr}": ${msg}`);
+  }
+  const deps = extractDependencies(ast);
+  for (const d of deps) {
+    const f = validateField(d as string, 'rule expression');
+    if (f) return f;
+  }
+  if (!returnsBoolean(ast)) {
+    return fail(
+      'Rule must return true or false',
+      `The expression "${expr}" does not produce a boolean. Wrap it in a comparison (like "call_oi > 80000") or use a boolean function like "topN(call_oi, 5)".`,
+    );
+  }
+  if (sampleRow) {
+    try {
+      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow] });
+      if (!Number.isFinite(v)) {
+        return fail(
+          `Expression produced ${v} on sample row`,
+          `Expression "${expr}" evaluated to ${v} (NaN/Infinity) for ATM row. Likely division by zero or invalid math.`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return fail(`Runtime error: ${msg}`, `Evaluating "${expr}" threw: ${msg}`);
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * Validate a single-expression column. Same as the boolean validator minus
+ * the boolean-root requirement — columns produce numeric values for display.
+ */
+export function validateNumericExpression(
+  expr: string, sampleRow: OptionChainRow | null,
+): ValidationResult {
+  if (!expr?.trim()) return fail('Expression is empty', 'The column needs a non-empty expression.');
+  let ast;
+  try {
+    ast = parseExpression(expr);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return fail(`Syntax error: ${msg}`, `Failed to parse "${expr}": ${msg}`);
+  }
+  const deps = extractDependencies(ast);
+  for (const d of deps) {
+    const f = validateField(d as string, 'column expression');
+    if (f) return f;
+  }
+  if (sampleRow) {
+    try {
+      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow] });
+      if (!Number.isFinite(v)) {
+        return fail(
+          `Expression produced ${v} on sample row`,
+          `Expression "${expr}" evaluated to ${v} (NaN/Infinity) for ATM row. Likely division by zero or invalid math.`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return fail(`Runtime error: ${msg}`, `Evaluating "${expr}" threw: ${msg}`);
+    }
+  }
+  return { ok: true };
 }

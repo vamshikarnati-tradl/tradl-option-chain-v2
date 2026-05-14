@@ -1,4 +1,4 @@
-import type { OptionChainRow, OptionChainSnapshot } from './types';
+import type { OptionChainRow, OptionChainSnapshot, SnapshotSource } from './types';
 
 type Listener = () => void;
 
@@ -13,6 +13,7 @@ export interface DataStoreState {
   status: 'connecting' | 'open' | 'closed' | 'error';
   error: string | null;
   snapshotCount: number;
+  source: SnapshotSource | null;
 }
 
 const ROW_FIELDS_TO_DIFF: ReadonlyArray<keyof OptionChainRow> = [
@@ -48,6 +49,7 @@ export class DataStore {
       status: 'connecting',
       error: null,
       snapshotCount: 0,
+      source: null,
     };
   }
 
@@ -79,6 +81,7 @@ export class DataStore {
       status: 'open',
       error: null,
       snapshotCount: this.state.snapshotCount + 1,
+      source: snapshot.source,
     };
     this.emit();
   }

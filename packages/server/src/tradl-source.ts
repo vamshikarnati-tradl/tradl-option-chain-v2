@@ -91,6 +91,7 @@ function buildSnapshotFromSub(sub: Subscription): OptionChainSnapshot {
     underlyingValue: sub.underlyingValue,
     fetchedAt: sub.asof,
     rows,
+    source: 'tradl-gateway',
   };
 }
 

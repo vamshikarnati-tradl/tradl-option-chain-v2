@@ -220,5 +220,6 @@ export function buildMockSnapshot(symbol: string, expiryDate?: string): OptionCh
     underlyingValue: Number(s.spot.toFixed(2)),
     fetchedAt: Date.now(),
     rows,
+    source: 'mock',
   };
 }

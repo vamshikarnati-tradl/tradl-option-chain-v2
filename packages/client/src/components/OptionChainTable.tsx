@@ -135,7 +135,7 @@ function RuleChipStrip({ applied }: { applied: AppliedRule[] | undefined }) {
           key={a.rule.id}
           title={a.rule.name}
           className="w-1.5 h-1.5 rounded-full"
-          style={{ background: ruleHsl(a.rule.style.hue, 0.95) }}
+          style={{ background: ruleHsl(a.rule.hue, 0.95) }}
         />
       ))}
     </span>
@@ -157,7 +157,6 @@ function StrikeCell({ row, isATM, applied, style, hover }: {
   const isCallITM = row.strikePrice < row.underlyingValue;
   const isPutITM = row.strikePrice > row.underlyingValue;
 
-  // Moneyness marker bar — green for ITM call, red for ITM put, neutral OTM
   let markerColor = 'bg-ink-4/30';
   let markerWidth = 6;
   if (isCallITM) { markerColor = 'bg-pos/70'; markerWidth = 18; }
@@ -196,6 +195,8 @@ interface RowProps {
   expanded: boolean;
   applied: AppliedRule[] | undefined;
   cellMap: Map<NumericField, AppliedRule[]> | undefined;
+  /** Per-column-cell rule highlights for this row. Keyed by column id. */
+  columnCellMap: Map<string, AppliedRule[]> | undefined;
   cells: { def: CustomColumnDefinition; cell: ColumnCellResult }[];
   customColDefs: CustomColumnDefinition[];
   onCellEnter: CellEnter;
@@ -203,8 +204,8 @@ interface RowProps {
 }
 
 const StrikeRow = memo(function StrikeRow({
-  row, prev, isATM, expanded, applied, cellMap, cells, customColDefs,
-  onCellEnter, onCellLeave,
+  row, prev, isATM, expanded, applied, cellMap, columnCellMap,
+  cells, customColDefs, onCellEnter, onCellLeave,
 }: RowProps) {
   const isCallITM = row.strikePrice < row.underlyingValue;
   const isPutITM  = row.strikePrice > row.underlyingValue;
@@ -223,18 +224,23 @@ const StrikeRow = memo(function StrikeRow({
   const putOiStyle   = styleFor(PUT_OI_FIELDS);
   const strikeStyle  = styleFor(STRIKE_FIELDS);
 
-  // Every tintable cell reports the row context AND the field list it
-  // represents on mouseEnter. Rules tinting that cell (if any) ride along so
-  // the tooltip can break them out with live values.
   const ruleHover = (fields: readonly NumericField[]) => ({
     onMouseEnter: () => {
-      onCellEnter({ row, fields, applied: rulesForCell(cellMap, fields) ?? [] });
+      onCellEnter({
+        row,
+        fields,
+        applied: rulesForCell(cellMap, fields) ?? [],
+      });
     },
     onMouseLeave: onCellLeave,
   });
-  const customHover = (def: CustomColumnDefinition, cell: ColumnCellResult) => ({
+  const customHover = (
+    def: CustomColumnDefinition,
+    cell: ColumnCellResult,
+    appliedForCol: AppliedRule[] | undefined,
+  ) => ({
     onMouseEnter: () => {
-      onCellEnter({ row, custom: { def, cell } });
+      onCellEnter({ row, custom: { def, cell }, applied: appliedForCol });
     },
     onMouseLeave: onCellLeave,
   });
@@ -303,11 +309,19 @@ const StrikeRow = memo(function StrikeRow({
         const cell = entry?.cell ?? { strikePrice: row.strikePrice, value: null };
         const v = cell.value;
         const err = cell.error;
+        // Per-cell tint for this custom column at this strike, picked up from
+        // rule matches whose expressions referenced this column via
+        // `columnRef`/`crossColumnRef`. Uses the same `bgForCell` palette
+        // composition as raw-field cells so multi-rule overlap renders
+        // identically.
+        const colRules = columnCellMap?.get(col.id);
+        const colStyle = bgForCell(colRules);
         return (
           <td
             key={col.id}
             className={`${cellBase} text-ink custom-col`}
-            {...customHover(col, cell)}
+            style={colStyle}
+            {...customHover(col, cell, colRules)}
           >
             {v == null ? (
               <span className="text-ink-4 italic" title={err ?? 'no value'}>—</span>
@@ -403,8 +417,8 @@ function findAtmStrike(rows: OptionChainRow[], spot: number): number | null {
 }
 
 export function OptionChainTable({
-  rows, prevRowsByStrike, highlights, columnIndex, expanded = false, mouse,
-  scrollResetKey,
+  rows, prevRowsByStrike, highlights, columnIndex,
+  expanded = false, mouse, scrollResetKey,
 }: Props) {
   const spot = rows[0]?.underlyingValue ?? 0;
   const atm = useMemo(() => findAtmStrike(rows, spot), [rows, spot]);
@@ -484,6 +498,7 @@ export function OptionChainTable({
                 expanded={expanded}
                 applied={highlights.byStrike.get(row.strikePrice)}
                 cellMap={highlights.byCell.get(row.strikePrice)}
+                columnCellMap={highlights.byColumnCell.get(row.strikePrice)}
                 cells={columnIndex.byStrike.get(row.strikePrice) ?? []}
                 customColDefs={customCols}
                 onCellEnter={onCellEnter}
@@ -493,7 +508,7 @@ export function OptionChainTable({
           ))}
         </tbody>
       </table>
-      <HoverTooltip payload={hover} mouse={mouse} />
+      <HoverTooltip payload={hover} mouse={mouse} columns={columnIndex.defs} />
     </div>
   );
 }

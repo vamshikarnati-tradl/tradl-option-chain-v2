@@ -10,7 +10,7 @@ import { usePalettePosition } from './usePalettePosition';
 import { PAL_W, type Status } from './types';
 import {
   AIParseError, columnFromAi, ruleFromAi,
-  type AIParseResult, type AITurn,
+  type AIParseResult, type AITurn, type AmbiguousOption,
 } from '../../services/aiParse';
 import { loadRecent, recordRecent, type RecentEntry } from '../../services/aiHistory';
 import { useAiParse } from '../../hooks/useAiParse';
@@ -171,12 +171,36 @@ export function CommandPalette({
     });
   };
 
+  // Disambiguate by replaying the prior ambiguous response as an assistant
+  // turn, then sending the picked option's label+description as the user's
+  // next turn. The LLM sees the full conversation and resolves to a concrete
+  // rule/column — no grammar-mangling prefix on the original query.
+  const submitOptionPick = (opt: AmbiguousOption) => {
+    if (!result || parse.isPending) return;
+    const followup = `${opt.label}: ${opt.description}`;
+    const nextTurns: AITurn[] = [
+      ...turns,
+      { userText: lastInputRef.current, assistantJson: JSON.stringify(result) },
+    ].slice(-4);
+    setTurns(nextTurns);
+    lastInputRef.current = followup;
+    setRefineInput('');
+    parse.mutate({
+      input: followup,
+      availableFields: [...NUMERIC_FIELDS],
+      existingRules: rules.map((r) => r.name),
+      existingColumns: columns.map((c) => c.name),
+      symbol,
+      history: nextTurns,
+    });
+  };
+
   const apply = (intent: 'rule' | 'column', editedJson?: string) => {
     if (!result && !editedJson) return;
     try {
       const data = editedJson ? JSON.parse(editedJson) : result;
       if (intent === 'rule' && data?.rule) {
-        const hue = nextUnusedHue(rules.map((r) => r.style.hue));
+        const hue = nextUnusedHue(rules.map((r) => r.hue));
         const built = ruleFromAi(data.rule, hue);
         onApplyRule(built);
         setRecent(recordRecent({ query: input.trim(), intent: 'rule', name: built.name }));
@@ -282,12 +306,10 @@ export function CommandPalette({
           <PreviewBody
             result={result}
             rows={rows}
+            columns={columns}
             onApply={apply}
             onEditJson={() => setEditingJson(JSON.stringify(result, null, 2))}
-            onPickOption={(opt) => {
-              const hint = opt.intent === 'rule' ? 'highlight ' : 'add a column for ';
-              submit(hint + input);
-            }}
+            onPickOption={submitOptionPick}
             onRephrase={() => { inputRef.current?.focus(); inputRef.current?.select(); }}
             refineValue={refineInput}
             onRefineChange={setRefineInput}

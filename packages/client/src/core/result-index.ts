@@ -1,7 +1,8 @@
 // Inverts the rule/column result lists into per-strike + per-cell lookups for
-// O(1) read in the table. Cell-level tinting comes from `byCell`: every (strike,
-// field) → list of rules that named `field` in their dependencies AND matched
-// that strike.
+// O(1) read in the table. Cell-level tinting comes from `byCell`: every
+// (strike, field) → list of rules whose evaluation actually read `field` on
+// that row (per `evaluateWithTrace`, respecting short-circuit + ternary
+// branch selection).
 
 import type {
   ColumnCellResult, ColumnResult, CustomColumnDefinition, NumericField,
@@ -11,13 +12,19 @@ import { ruleBg, ruleHsl } from './palette';
 
 export interface AppliedRule {
   rule: RuleDefinition;
-  matchedConditionIndices: number[];
+  /** Fields the engine actually read on this row while evaluating the rule. */
   affectedFields: NumericField[];
+  /** Saved-column ids the rule consulted on this row. Drives column-cell tinting. */
+  affectedColumns: string[];
 }
 
 export interface RuleHighlight {
   byStrike: Map<number, AppliedRule[]>;
   byCell: Map<number, Map<NumericField, AppliedRule[]>>;
+  /** Cell-tint index for CUSTOM column cells, keyed by (strike, columnId).
+   *  When a rule references `maxPainLevel`, the maxPainLevel cell at the
+   *  matching strike picks up the rule's tint via this map. */
+  byColumnCell: Map<number, Map<string, AppliedRule[]>>;
 }
 
 export function indexRuleResults(
@@ -26,14 +33,15 @@ export function indexRuleResults(
 ): RuleHighlight {
   const byStrike = new Map<number, AppliedRule[]>();
   const byCell = new Map<number, Map<NumericField, AppliedRule[]>>();
+  const byColumnCell = new Map<number, Map<string, AppliedRule[]>>();
   for (const r of results) {
     const def = rulesById.get(r.ruleId);
     if (!def) continue;
     for (const m of r.matches) {
       const entry: AppliedRule = {
         rule: def,
-        matchedConditionIndices: m.matchedConditionIndices,
         affectedFields: m.affectedFields,
+        affectedColumns: m.affectedColumns ?? [],
       };
       const sList = byStrike.get(m.strikePrice);
       if (sList) sList.push(entry); else byStrike.set(m.strikePrice, [entry]);
@@ -44,9 +52,17 @@ export function indexRuleResults(
         const list = cellMap.get(f);
         if (list) list.push(entry); else cellMap.set(f, [entry]);
       }
+      if (entry.affectedColumns.length > 0) {
+        let colMap = byColumnCell.get(m.strikePrice);
+        if (!colMap) { colMap = new Map(); byColumnCell.set(m.strikePrice, colMap); }
+        for (const id of entry.affectedColumns) {
+          const list = colMap.get(id);
+          if (list) list.push(entry); else colMap.set(id, [entry]);
+        }
+      }
     }
   }
-  return { byStrike, byCell };
+  return { byStrike, byCell, byColumnCell };
 }
 
 export interface AppliedColumn {
@@ -88,16 +104,14 @@ export interface CellStyle {
 
 // Compose a cell background from a set of rules that tinted it.
 // Dominant rule (first in list) fills the cell; additional rules render as
-// stacked 2px inset rings. Caps additional rings at 3 to avoid visual chaos —
-// the strike-cell RuleChipStrip remains the canonical "all rules on this row"
-// indicator for higher collision counts.
+// stacked 2px inset rings. Caps additional rings at 3 to avoid visual chaos.
 export function bgForCell(rules: AppliedRule[] | undefined): CellStyle {
   if (!rules?.length) return {};
   const [dominant, ...rest] = rules;
-  const background = ruleBg(dominant.rule.style.hue, 0.18);
+  const background = ruleBg(dominant.rule.hue, 0.18);
   if (!rest.length) return { background };
   const rings = rest.slice(0, 3).map((r, i) =>
-    `inset 0 0 0 ${2 + i * 2}px ${ruleHsl(r.rule.style.hue, 0.75)}`,
+    `inset 0 0 0 ${2 + i * 2}px ${ruleHsl(r.rule.hue, 0.75)}`,
   );
   return { background, boxShadow: rings.join(', ') };
 }

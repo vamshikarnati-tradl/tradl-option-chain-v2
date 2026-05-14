@@ -67,5 +67,6 @@ export function buildSnapshot(
     underlyingValue,
     fetchedAt: Date.now(),
     rows,
+    source: 'nse',
   };
 }

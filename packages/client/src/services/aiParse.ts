@@ -1,20 +1,30 @@
-// Typed fetch wrapper for /api/ai/parse — server returns AI-parsed rule or column.
+// Typed fetch wrapper for /api/ai/parse — server returns AI-parsed rule or
+// column. The server still emits the legacy multi-condition rule shape; this
+// adapter collapses it into the new single-expression `RuleDefinition`.
 
 import type {
-  Condition, ConditionLhs, ConditionRhs, CustomColumnDefinition,
-  NumericField, Operator, RuleDefinition,
+  CustomColumnDefinition, RuleDefinition,
 } from '../core/types';
+
+interface RawConditionSide {
+  kind: 'field' | 'expr' | 'literal' | 'range';
+  field?: string;
+  expression?: string;
+  value?: number | [number, number];
+}
+
+interface RawCondition {
+  lhs: RawConditionSide;
+  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'between';
+  rhs: RawConditionSide;
+}
 
 interface RawRule {
   name: string;
   description: string;
   logic: 'AND' | 'OR';
   scope: 'call' | 'put' | 'row';
-  conditions: {
-    lhs: { kind: 'field' | 'expr'; field?: string; expression?: string };
-    operator: Operator;
-    rhs: { kind: 'literal' | 'field' | 'expr'; value?: number; field?: string; expression?: string };
-  }[];
+  conditions: RawCondition[];
 }
 
 interface RawColumn {
@@ -36,8 +46,6 @@ export interface AIParseResult {
   rule?: RawRule;
   column?: RawColumn;
   options?: AmbiguousOption[];
-  // Server returned this after a successful self-repair retry. Lets the
-  // palette show a subtle "corrected by AI" hint.
   repaired?: boolean;
 }
 
@@ -45,19 +53,13 @@ export class AIParseError extends Error {
   constructor(
     message: string,
     public readonly status?: number,
-    // Validator's longer explanation (422 only).
     public readonly detail?: string,
-    // The original LLM draft that failed validation (422 only). Lets the
-    // palette drop into the JSON editor so the user can hand-fix.
     public readonly draft?: AIParseResult,
   ) {
     super(message);
   }
 }
 
-// One previous turn of the refine conversation. The client sends an array of
-// these so the server can replay the chat statelessly. `assistantJson` is the
-// stringified prior AIParseResult (matches what the LLM emitted).
 export interface AITurn {
   userText: string;
   assistantJson: string;
@@ -68,11 +70,7 @@ export interface AIParseRequest {
   availableFields: string[];
   existingRules: string[];
   existingColumns: string[];
-  // Identifies which symbol the server should pick its ATM sample row from
-  // for the dry-run validation.
   symbol?: string;
-  // Prior turns of the refine conversation (oldest → newest). Capped server-
-  // side to bound payload.
   history?: AITurn[];
 }
 
@@ -95,25 +93,63 @@ export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSi
   return (await res.json()) as AIParseResult;
 }
 
-// ─── Adapters: AI shape → app shape ───
-//
-// The AI emits the same lhs/operator/rhs structure the engine consumes, so the
-// adapters mostly fix up missing optional fields and assign a fresh id + hue.
+// ─── Adapters: AI legacy shape → new single-expression shape ───
+
+const OP_SYM: Record<RawCondition['operator'], string> = {
+  gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '==', neq: '!=', between: 'between',
+};
+
+function sideToString(side: RawConditionSide): string {
+  if (side.kind === 'field' && side.field) return side.field;
+  if (side.kind === 'literal' && typeof side.value === 'number') return String(side.value);
+  if (side.kind === 'expr' && side.expression) return side.expression;
+  return '';
+}
+
+function conditionToExpr(c: RawCondition): string {
+  const lhs = sideToString(c.lhs);
+  if (!lhs) return '';
+  if (c.operator === 'between' && c.rhs.kind === 'range' && Array.isArray(c.rhs.value)) {
+    const [lo, hi] = c.rhs.value;
+    return `(${lhs} >= ${lo} && ${lhs} <= ${hi})`;
+  }
+  const rhs = sideToString(c.rhs);
+  if (!rhs) return '';
+  return `${lhs} ${OP_SYM[c.operator]} ${rhs}`;
+}
+
+function buildExpression(raw: RawRule): string {
+  const parts = raw.conditions.map(conditionToExpr).filter(Boolean);
+  if (parts.length === 0) return '';
+  if (parts.length === 1) return parts[0];
+  const joiner = raw.logic === 'OR' ? ' || ' : ' && ';
+  return parts.map((p) => `(${p})`).join(joiner);
+}
+
+/** Locate the bound literal of the first condition's rhs in the built
+ *  expression string so the slider knows which char range it controls. */
+function firstLiteralOffset(raw: RawRule, expression: string): number | null {
+  const first = raw.conditions[0];
+  if (!first || first.rhs.kind !== 'literal' || typeof first.rhs.value !== 'number') return null;
+  const needle = String(first.rhs.value);
+  const idx = expression.indexOf(needle);
+  return idx >= 0 ? idx : null;
+}
 
 export function ruleFromAi(raw: RawRule, hue: number): RuleDefinition {
+  const expression = buildExpression(raw);
+  const offset = firstLiteralOffset(raw, expression);
+  const literal = raw.conditions[0]?.rhs.kind === 'literal' && typeof raw.conditions[0]?.rhs.value === 'number'
+    ? raw.conditions[0].rhs.value
+    : null;
   return {
     id: `ai_${Date.now().toString(36)}`,
     name: raw.name,
     description: raw.description,
     enabled: true,
-    logic: raw.logic,
-    style: { hue, scope: raw.scope },
-    conditions: raw.conditions.map((c): Condition => ({
-      lhs: normalizeLhs(c.lhs),
-      operator: c.operator,
-      rhs: normalizeRhs(c.rhs),
-    })),
-    slider: deriveSlider(raw),
+    expression,
+    hue,
+    slider: offset !== null && literal !== null ? deriveSlider(literal, offset) : undefined,
   };
 }
 
@@ -127,38 +163,10 @@ export function columnFromAi(raw: RawColumn): CustomColumnDefinition {
   };
 }
 
-function normalizeLhs(lhs: RawRule['conditions'][number]['lhs']): ConditionLhs {
-  if (lhs.kind === 'field' && lhs.field) {
-    return { kind: 'field', field: lhs.field as NumericField };
-  }
-  return { kind: 'expr', expression: lhs.expression ?? '' };
-}
-
-function normalizeRhs(rhs: RawRule['conditions'][number]['rhs']): ConditionRhs {
-  if (rhs.kind === 'literal' && typeof rhs.value === 'number') {
-    return { kind: 'literal', value: rhs.value };
-  }
-  if (rhs.kind === 'field' && rhs.field) {
-    return { kind: 'field', field: rhs.field as NumericField };
-  }
-  return { kind: 'expr', expression: rhs.expression ?? '' };
-}
-
-// If the first condition has a literal rhs, expose it as a slider so users can
-// tune the threshold from the rule editor without re-prompting.
-function deriveSlider(raw: RawRule) {
-  const c = raw.conditions[0];
-  if (!c || c.rhs.kind !== 'literal' || typeof c.rhs.value !== 'number') return undefined;
-  const v = c.rhs.value;
-  const abs = Math.abs(v);
+function deriveSlider(literal: number, literalOffset: number) {
+  const abs = Math.abs(literal);
   const step = abs >= 1000 ? Math.round(abs / 100) : abs >= 10 ? 0.5 : 0.05;
-  const min = v < 0 ? Math.min(v * 4, -100_000) : 0;
-  const max = v < 0 ? 0 : Math.max(v * 4, 100);
-  return {
-    conditionIndex: 0,
-    min,
-    max,
-    step,
-    label: 'Threshold',
-  };
+  const min = literal < 0 ? Math.min(literal * 4, -100_000) : 0;
+  const max = literal < 0 ? 0 : Math.max(literal * 4, 100);
+  return { literalOffset, min, max, step, label: 'Threshold' };
 }

@@ -33,9 +33,6 @@ export function App() {
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [expanded, setExpanded] = usePersistedToggle(STORAGE_KEYS.expanded);
-  // Below `md` we force the table into compact mode regardless of the
-  // persisted toggle — Vol/IV columns make it overflow horizontally and
-  // the toggle itself is hidden in the header anyway.
   const isTablet = useIsTablet();
   const tableExpanded = expanded && !isTablet;
 
@@ -43,11 +40,12 @@ export function App() {
   const mouse = useMouseTracking();
   useGlobalShortcut({ onSlash: palette.openAtCursor, onCmdK: palette.openCentered });
 
-  // Persist user changes
   useEffect(() => saveRules(rules), [rules]);
   useEffect(() => saveColumns(columns), [columns]);
 
-  // Fetch expiries when symbol changes (TanStack Query handles caching + cancellation).
+  const openRules = () => { setRulesOpen((o) => !o); setColumnsOpen(false); };
+  const openColumns = () => { setColumnsOpen((o) => !o); setRulesOpen(false); };
+
   const { data: expiriesData } = useExpiries(symbol);
   const expiries = expiriesData?.expiries ?? [];
   useEffect(() => {
@@ -62,7 +60,6 @@ export function App() {
   const prevSnapshot = usePrevSnapshot(data.rows);
   const { spotChange, spotPct } = useSessionBaseSpot(data.underlyingValue);
 
-  // Sync expiry in header to whatever the data store knows (it follows the most recent snapshot).
   useEffect(() => {
     if (data.expiryDate && !expiry) setExpiry(data.expiryDate);
   }, [data.expiryDate, expiry]);
@@ -86,8 +83,8 @@ export function App() {
     [data.rows],
   );
 
-  const sampleRow = data.rows.length ? data.rows[Math.floor(data.rows.length / 2)] : undefined;
   const enabledRulesCount = rules.filter((r) => r.enabled).length;
+  const anyPanelOpen = rulesOpen || columnsOpen;
 
   return (
     <div className="flex flex-col h-screen relative">
@@ -103,22 +100,23 @@ export function App() {
         spotPct={spotPct}
         rulesOpen={rulesOpen}
         columnsOpen={columnsOpen}
-        onToggleRules={() => { setRulesOpen((o) => !o); setColumnsOpen(false); }}
-        onToggleColumns={() => { setColumnsOpen((o) => !o); setRulesOpen(false); }}
+        onToggleRules={openRules}
+        onToggleColumns={openColumns}
         ruleCount={enabledRulesCount}
         columnCount={columns.length}
         lastUpdate={data.fetchedAt || Date.now()}
         connected={data.status === 'open'}
+        source={data.source}
         totalVolume={totalVolume}
         totalOI={totalOI}
-        panelOpen={rulesOpen || columnsOpen}
+        panelOpen={anyPanelOpen}
         expanded={expanded}
         onToggleExpanded={() => setExpanded((v) => !v)}
         onAsk={palette.openCentered}
       />
 
       <main className={`flex-1 overflow-auto bg-bg-0 transition-[padding] duration-300 ${
-        rulesOpen || columnsOpen ? 'sm:pr-[380px]' : ''
+        anyPanelOpen ? 'sm:pr-[380px]' : ''
       }`}>
         {data.error && (
           <div className="mx-3 mt-3 p-2 rounded border border-pill-neg-border bg-pill-neg text-neg text-sm">
@@ -142,8 +140,8 @@ export function App() {
         rulesOpen={rulesOpen}
         columnsOpen={columnsOpen}
         onAsk={palette.openCentered}
-        onToggleRules={() => { setRulesOpen((o) => !o); setColumnsOpen(false); }}
-        onToggleColumns={() => { setColumnsOpen((o) => !o); setRulesOpen(false); }}
+        onToggleRules={openRules}
+        onToggleColumns={openColumns}
       />
 
       <RulesPanel
@@ -152,6 +150,8 @@ export function App() {
         rules={rules}
         ruleCounts={ruleCounts}
         ruleErrors={compute.configErrors.ruleErrors}
+        rows={data.rows}
+        columns={columns}
         onChange={setRules}
       />
 
@@ -160,8 +160,11 @@ export function App() {
         onClose={() => setColumnsOpen(false)}
         columns={columns}
         columnErrors={compute.configErrors.columnErrors}
-        sampleRow={sampleRow}
+        cycleErrors={compute.configErrors.cycleErrors}
+        rows={data.rows}
+        rules={rules}
         onChange={setColumns}
+        onRulesChange={setRules}
       />
 
       <CommandPalette

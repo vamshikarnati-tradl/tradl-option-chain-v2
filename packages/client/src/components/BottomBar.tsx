@@ -17,7 +17,8 @@ interface Props {
 // Safe-area inset keeps the buttons above iOS home indicator without
 // leaving a gap on devices that don't have one.
 export function BottomBar({
-  ruleCount, columnCount, rulesOpen, columnsOpen,
+  ruleCount, columnCount,
+  rulesOpen, columnsOpen,
   onAsk, onToggleRules, onToggleColumns,
 }: Props) {
   return (

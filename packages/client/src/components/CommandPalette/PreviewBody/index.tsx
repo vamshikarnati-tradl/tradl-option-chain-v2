@@ -2,11 +2,12 @@ import { AmbiguousView } from './AmbiguousView';
 import { RulePreview } from './RulePreview';
 import { ColumnPreview } from './ColumnPreview';
 import type { AIParseResult, AmbiguousOption } from '../../../services/aiParse';
-import type { OptionChainRow } from '../../../core/types';
+import type { CustomColumnDefinition, OptionChainRow } from '../../../core/types';
 
 interface Props {
   result: AIParseResult;
   rows: OptionChainRow[];
+  columns: CustomColumnDefinition[];
   onApply: (intent: 'rule' | 'column') => void;
   onEditJson: () => void;
   onPickOption: (opt: AmbiguousOption) => void;
@@ -18,7 +19,7 @@ interface Props {
 }
 
 export function PreviewBody({
-  result, rows, onApply, onEditJson, onPickOption, onRephrase,
+  result, rows, columns, onApply, onEditJson, onPickOption, onRephrase,
   refineValue, onRefineChange, onRefineSubmit, isRefining,
 }: Props) {
   if (result.intent === 'ambiguous' && result.options) {
@@ -30,6 +31,7 @@ export function PreviewBody({
         <RulePreview
           result={result}
           rows={rows}
+          columns={columns}
           onApply={() => onApply('rule')}
           onEditJson={onEditJson}
           onRephrase={onRephrase}
@@ -49,6 +51,7 @@ export function PreviewBody({
         <ColumnPreview
           result={result}
           rows={rows}
+          columns={columns}
           onApply={() => onApply('column')}
           onEditJson={onEditJson}
           onRephrase={onRephrase}

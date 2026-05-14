@@ -1,2 +1,7 @@
-export type { Expr, BinaryOp, BuiltinFn } from '@tradl/shared';
-export { parseExpression, extractDependencies } from '@tradl/shared';
+export type {
+  Expr, BinaryOp, BuiltinFn,
+  AstDependencies, IntradayDep, HistoricalDep,
+} from '@tradl/shared';
+export {
+  parseExpression, extractDependencies, analyzeDependencies,
+} from '@tradl/shared';

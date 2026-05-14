@@ -4,19 +4,23 @@ import { ConfidenceBar, WarningBanner } from '../atoms';
 import { dryRunColumn, type ColumnSample } from '../../../services/aiPreview';
 import { fmtNum } from '../../../utils/format';
 import type { AIParseResult } from '../../../services/aiParse';
-import type { OptionChainRow } from '../../../core/types';
+import type { CustomColumnDefinition, OptionChainRow } from '../../../core/types';
 
 interface Props {
   result: AIParseResult;
   rows: OptionChainRow[];
+  columns: CustomColumnDefinition[];
   onApply: () => void;
   onEditJson: () => void;
   onRephrase: () => void;
 }
 
-export function ColumnPreview({ result, rows, onApply, onEditJson, onRephrase }: Props) {
+export function ColumnPreview({ result, rows, columns, onApply, onEditJson, onRephrase }: Props) {
   const c = result.column!;
-  const samples: ColumnSample[] = useMemo(() => dryRunColumn(c.expression, rows), [c.expression, rows]);
+  const samples: ColumnSample[] = useMemo(
+    () => dryRunColumn(c.expression, rows, columns),
+    [c.expression, rows, columns],
+  );
   const isLow = result.confidence < 0.7;
 
   const fmtSample = (s: ColumnSample) => {

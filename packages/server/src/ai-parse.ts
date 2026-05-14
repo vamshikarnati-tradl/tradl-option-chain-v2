@@ -112,7 +112,10 @@ function buildUserMessage(req: AIParseRequest): string {
     lines.push(`Active rules (avoid exact-name duplication): ${req.existingRules.join(', ')}`);
   }
   if (req.existingColumns.length) {
-    lines.push(`Active columns (avoid exact-name duplication): ${req.existingColumns.join(', ')}`);
+    // Saved columns can be referenced by name inside expressions, the same
+    // way raw data fields can. The model should prefer referencing an
+    // existing column over re-inlining its formula.
+    lines.push(`Active columns (reference by name; avoid exact-name duplication): ${req.existingColumns.join(', ')}`);
   }
   lines.push('Parse this and respond with the JSON object only.');
   return lines.join('\n');

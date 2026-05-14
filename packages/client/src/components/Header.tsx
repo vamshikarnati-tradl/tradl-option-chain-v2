@@ -4,6 +4,19 @@ import { Dropdown } from './Dropdown';
 import { Kbd, ToolbarButton } from './atoms';
 import { fmtChange, fmtCompact, fmtNum, timeAgo } from '../utils/format';
 import { NEXT_THEME, THEME_LABELS, useTheme, type Theme } from '../hooks/useTheme';
+import type { SnapshotSource } from '../core/types';
+
+function MockBadge() {
+  return (
+    <span
+      title="The TRADL gateway is unreachable — showing simulated mock data. Live data will resume automatically when the gateway recovers."
+      className="inline-flex items-center gap-1 h-5 px-1.5 rounded border border-pill-neg-border bg-pill-neg text-neg font-mono text-[10px] uppercase tracking-[0.08em]"
+    >
+      <span className="w-[5px] h-[5px] rounded-full bg-neg" />
+      mock
+    </span>
+  );
+}
 
 interface ConnDotProps {
   connected: boolean;
@@ -46,6 +59,7 @@ interface Props<S extends string> {
   columnCount: number;
   lastUpdate: number;
   connected: boolean;
+  source: SnapshotSource | null;
   totalVolume: number;
   totalOI: number;
   panelOpen: boolean;
@@ -57,8 +71,10 @@ interface Props<S extends string> {
 export function Header<S extends string>({
   symbol, symbols, setSymbol, expiry, setExpiry, expiries,
   spot, spotChange, spotPct,
-  rulesOpen, columnsOpen, onToggleRules, onToggleColumns,
-  ruleCount, columnCount, lastUpdate, connected, totalVolume, totalOI,
+  rulesOpen, columnsOpen,
+  onToggleRules, onToggleColumns,
+  ruleCount, columnCount,
+  lastUpdate, connected, source, totalVolume, totalOI,
   panelOpen, expanded, onToggleExpanded, onAsk,
 }: Props<S>) {
   const [theme, setTheme] = useTheme();
@@ -103,6 +119,7 @@ export function Header<S extends string>({
 
       {/* Right: actions */}
       <div className="flex items-center gap-1 sm:gap-3 shrink-0">
+        {source === 'mock' && <MockBadge />}
         <div className="hidden md:flex"><ConnectionDot connected={connected} lastUpdate={lastUpdate} /></div>
         {/* Mobile-only: just a pulsing dot */}
         <span className={`md:hidden w-[7px] h-[7px] rounded-full ${connected ? 'bg-pos animate-pulse-soft' : 'bg-neg'}`} />

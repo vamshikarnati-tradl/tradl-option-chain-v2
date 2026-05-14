@@ -6,4 +6,5 @@ export const STORAGE_KEYS = {
   paletteRecent: 'tradl.palette.recent',
   theme: 'tradl.theme',
   expanded: 'tradl.expanded',
+  ruleBuilderPrefs: 'tradl.ruleBuilder.prefs.v1',
 } as const;

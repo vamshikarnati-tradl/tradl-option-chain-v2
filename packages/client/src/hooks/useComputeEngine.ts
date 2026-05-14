@@ -6,7 +6,8 @@ import {
   type ConfigErrors,
 } from '../core/compute-bridge';
 import type {
-  ColumnResult, CustomColumnDefinition, OptionChainRow, RuleDefinition, RuleResult,
+  ColumnResult, CustomColumnDefinition,
+  OptionChainRow, RuleDefinition, RuleResult,
 } from '../core/types';
 
 export interface ComputeState {
@@ -16,7 +17,7 @@ export interface ComputeState {
   configErrors: ConfigErrors;
 }
 
-const EMPTY_ERRORS: ConfigErrors = { ruleErrors: [], columnErrors: [] };
+const EMPTY_ERRORS: ConfigErrors = { ruleErrors: [], columnErrors: [], cycleErrors: [] };
 
 export function useComputeEngine(
   rows: OptionChainRow[],
@@ -36,20 +37,23 @@ export function useComputeEngine(
   useEffect(() => {
     const off1 = bridge.onResult(setOutput);
     const off2 = bridge.onConfigErrors(setErrors);
-    // Note: do NOT destroy() the bridge in cleanup. StrictMode dev would
-    // terminate the worker on the simulated unmount and the same bridge
-    // instance would re-attach to a dead worker on remount. The worker
-    // gets cleaned up by the browser when the page unloads.
     return () => { off1(); off2(); };
   }, [bridge]);
 
-  useEffect(() => {
-    bridge.setRules(rules);
-  }, [bridge, rules]);
-
+  // Columns ship FIRST. Rule compilation (next effect) resolves column
+  // references against the engine's stored columnDefs — if rules fired
+  // first on mount, every `maxPain`-style identifier would compile against
+  // an empty columns map and surface as "Unknown identifier."
   useEffect(() => {
     bridge.setColumns(columns);
   }, [bridge, columns]);
+
+  // Rules depend on columns for name resolution. Re-send whenever either
+  // rules OR columns change — a column rename should re-resolve any rule
+  // that references it, even when the rules array itself didn't change.
+  useEffect(() => {
+    bridge.setRules(rules);
+  }, [bridge, rules, columns]);
 
   useEffect(() => {
     if (rows.length === 0) return;
