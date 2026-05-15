@@ -947,6 +947,54 @@ export const CATEGORY_CATALOG: readonly CategorySpec[] = [
   },
 ];
 
+// ───── Subgroup metadata (one-line description per category × subgroup) ─────
+//
+// Functions live in `${category}:${subgroup}` buckets. The picker derives
+// subgroups from the function records themselves; this catalog adds a short
+// description per bucket — used by the LLM tool-use index so the model can
+// pick which buckets it needs without seeing every function's full spec.
+
+export interface SubgroupSpec {
+  category: Category;
+  name: string;
+  description: string;
+}
+
+export const SUBGROUP_CATALOG: readonly SubgroupSpec[] = [
+  { category: 'math', name: 'Single number',
+    description: 'Operate on one number: abs, round, sqrt, log, exp, sign, etc.' },
+  { category: 'math', name: 'Many numbers',
+    description: 'Reduce many numbers to one: min, max, sum, avg, median, stddev, variance, product.' },
+  { category: 'math', name: 'Adjustment',
+    description: 'Constrain or interpolate values: clamp, lerp.' },
+  { category: 'logic', name: 'Conditional',
+    description: 'Pick a value based on a condition: ifelse, ternary.' },
+  { category: 'logic', name: 'Count',
+    description: 'Count or quantify booleans: any, all, count.' },
+  { category: 'crossStrike', name: 'Pick one',
+    description: 'Read one value from another strike in the snapshot: atStrike, atOffset, atm.' },
+  { category: 'crossStrike', name: 'Aggregate over all',
+    description: 'Aggregate a field across every strike: sumStrikes, avgStrikes, medianStrikes, minStrikes, maxStrikes, stddevStrikes.' },
+  { category: 'crossStrike', name: 'Fold expression',
+    description: 'Aggregate an expression evaluated per other strike using `cross_*` references: sumOverStrikes, avgOverStrikes, etc.' },
+  { category: 'crossStrike', name: 'Ranking',
+    description: 'Rank or filter strikes by a field: rank, pctile, topN, bottomN.' },
+  { category: 'recentHistory', name: 'Point in past',
+    description: 'Read a field value from a moment ago (seconds to minutes). Phase 2 — not yet runnable.' },
+  { category: 'recentHistory', name: 'Over a window',
+    description: 'Aggregate over the recent intraday window. Phase 2 — not yet runnable.' },
+  { category: 'recentHistory', name: 'Patterns',
+    description: 'Detect intraday patterns: spikes, crossovers, runs. Phase 2.' },
+  { category: 'pastDays', name: 'Specific day',
+    description: 'Read a field from a past session. Phase 3 — needs backend service.' },
+  { category: 'pastDays', name: 'Aggregate over days',
+    description: 'Aggregate across multiple past sessions. Phase 3.' },
+  { category: 'pastDays', name: 'Range of days',
+    description: 'Sliding/lookback ranges over past sessions. Phase 3.' },
+  { category: 'pastDays', name: 'Compare',
+    description: 'Compare today vs an earlier session. Phase 3.' },
+];
+
 // ───── Comparator metadata (used by Filter Builder, not the function picker) ─────
 
 export const COMPARATORS = ['>', '<', '>=', '<=', '==', '!='] as const;

@@ -45,14 +45,6 @@ export function RulePreview({ result, rows, columns, onApply, onEditJson, onReph
       <div className="flex items-center gap-2 mb-3">
         <StatePill tone="accent">◆ Rule</StatePill>
         <span className="text-[13px] font-medium truncate">{def.name}</span>
-        {result.repaired && (
-          <span
-            className="px-1.5 py-0.5 rounded text-[10px] font-mono text-ink-3 bg-bg-3"
-            title="The model's first draft failed validation. The server prompted it once more to fix the issue."
-          >
-            ↻ auto-corrected
-          </span>
-        )}
         <span className="ml-auto"><ConfidenceBar value={result.confidence} /></span>
       </div>
 

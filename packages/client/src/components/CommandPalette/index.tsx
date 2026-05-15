@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Kbd } from '../atoms';
 import { IdleBody } from './IdleBody';
 import { ParsingBody } from './ParsingBody';
@@ -10,11 +10,12 @@ import { usePalettePosition } from './usePalettePosition';
 import { PAL_W, type Status } from './types';
 import {
   AIParseError, columnFromAi, ruleFromAi,
-  type AIParseResult, type AITurn, type AmbiguousOption,
+  type AIParseResult, type AmbiguousOption,
+  type ConversationState,
 } from '../../services/aiParse';
 import { loadRecent, recordRecent, type RecentEntry } from '../../services/aiHistory';
 import { useAiParse } from '../../hooks/useAiParse';
-import { NUMERIC_FIELDS } from '../../core/types';
+import { buildLlmIndex } from '../../core/llm-index';
 import { nextUnusedHue } from '../../core/palette';
 import type { CustomColumnDefinition, OptionChainRow, RuleDefinition } from '../../core/types';
 
@@ -24,19 +25,21 @@ interface Props {
   rules: RuleDefinition[];
   columns: CustomColumnDefinition[];
   rows: OptionChainRow[];
-  // Symbol the user is currently viewing. Passed to /api/ai/parse so the
-  // server can pick its ATM sample row for dry-run validation.
   symbol: string;
-  /** Live cursor position. Used when `anchor === 'cursor'`. */
   mouse: { x: number; y: number } | null;
-  /**
-   * 'cursor' = follow the live cursor until the user types or hovers in
-   * (current `/` shortcut behaviour). `{x,y}` = open pinned at that
-   * coordinate (Ask button + Cmd+K — feels like a centered modal).
-   */
   anchor: 'cursor' | { x: number; y: number };
   onApplyRule: (rule: RuleDefinition) => void;
   onApplyColumn: (col: CustomColumnDefinition) => void;
+}
+
+// Local UI status. 'preview' is the only state that holds a result; the
+// 'clarification' state holds a model question and an opaque conversation
+// state the next submit echoes back to the server.
+type PaletteStatus = Status | 'clarification';
+
+interface ClarificationTurn {
+  userText: string;
+  question: string;
 }
 
 export function CommandPalette({
@@ -46,25 +49,21 @@ export function CommandPalette({
   const [editingJson, setEditingJson] = useState<string | null>(null);
   const [recent, setRecent] = useState<RecentEntry[]>(() => loadRecent());
   const [refineInput, setRefineInput] = useState('');
-  const [turns, setTurns] = useState<AITurn[]>([]);
+  // The model's last clarifying question + the conversation state we echo
+  // back on the next submit. Reset when a fresh query starts.
+  const [clarification, setClarification] = useState<ClarificationTurn | null>(null);
+  const conversationRef = useRef<ConversationState | undefined>(undefined);
+  // A short transcript of prior user turns shown above a clarification, so
+  // the user remembers what they asked.
+  const [transcript, setTranscript] = useState<string[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
-  // The text that produced the currently-displayed result. Push this into
-  // `turns` when the user submits a refine so the LLM sees the prior question.
-  const lastInputRef = useRef('');
 
-  // Keep the sheet mounted briefly after `open` flips false so the slide-down
-  // exit animation can play. `entered` controls the transform/opacity classes
-  // for the enter and exit transitions on mobile (and a soft fade on desktop).
   const [shouldRender, setShouldRender] = useState(open);
   const [entered, setEntered] = useState(false);
   useEffect(() => {
     if (open) {
       setShouldRender(true);
-      // Double RAF — single RAF can fire before the browser paints the
-      // initial `translate-y-full` state, so the transition would have
-      // nothing to animate from. RAF1 ensures the initial paint happens;
-      // RAF2 then flips `entered=true` so the transition kicks in cleanly.
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
         raf2 = requestAnimationFrame(() => setEntered(true));
@@ -77,35 +76,43 @@ export function CommandPalette({
   }, [open]);
 
   const parse = useAiParse();
-  const status: Status =
+  const data = parse.data ?? null;
+  const result: AIParseResult | null = data?.kind === 'result' ? data.result : null;
+
+  const status: PaletteStatus =
     parse.isPending ? 'parsing' :
     parse.isError ? 'error' :
-    parse.isSuccess ? 'preview' :
+    clarification ? 'clarification' :
+    result ? 'preview' :
     'idle';
-  const result: AIParseResult | null = parse.data ?? null;
   const error = parse.error ? errorMessage(parse.error) : null;
 
   const position = usePalettePosition({ open, anchor, mouse, rootRef, inputLength: input.length });
 
-  // Reset every open
+  // Index sent to the LLM is recomputed every render off the live columns
+  // — cheap (pure function over the catalog + columns array).
+  const index = useMemo(() => buildLlmIndex(columns), [columns]);
+  const columnDefs = useMemo(
+    () => columns.map((c) => ({ id: c.id, name: c.name, expression: c.expression })),
+    [columns],
+  );
+
+  // ─── Lifecycle ───
   useEffect(() => {
     if (open) {
       setInput('');
       setEditingJson(null);
       setRecent(loadRecent());
       setRefineInput('');
-      setTurns([]);
-      lastInputRef.current = '';
+      setClarification(null);
+      setTranscript([]);
+      conversationRef.current = undefined;
       parse.reset();
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-    // intentionally only on `open` — `parse` is stable per render and resetting
-    // on every render would prevent results from rendering.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Click-outside-to-close. Mounted on next tick so the keypress that
-  // opened the palette doesn't immediately close it via mousedown bubbling.
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -115,7 +122,6 @@ export function CommandPalette({
     return () => { window.clearTimeout(t); window.removeEventListener('mousedown', onDown); };
   }, [open, onClose]);
 
-  // Esc to close (global, even if a child stole focus)
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -125,76 +131,87 @@ export function CommandPalette({
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Editing the input invalidates the preview/error so users don't
-  // accidentally Enter-apply something stale.
+  // Editing the input invalidates the preview/error/clarification.
   useEffect(() => {
-    if (open && (parse.isSuccess || parse.isError)) parse.reset();
+    if (!open) return;
+    if (parse.isSuccess || parse.isError) parse.reset();
+    if (clarification) setClarification(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input]);
 
-  const submit = (text?: string) => {
+  // After a successful response, update clarification + transcript state.
+  useEffect(() => {
+    if (!data) return;
+    if (data.kind === 'clarification') {
+      conversationRef.current = data.state;
+      setClarification({ userText: lastSubmissionRef.current, question: data.question });
+      setTranscript((t) => [...t, lastSubmissionRef.current]);
+    } else {
+      // result — preserve the transcript so multi-turn refinements still see
+      // the prior questions, but drop the clarification UI.
+      setClarification(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+
+  // What text was last submitted (kept in a ref so the data-effect above
+  // can tag it onto the clarification turn without re-rendering).
+  const lastSubmissionRef = useRef('');
+
+  // ─── Submit helpers ───
+
+  const submitFresh = (text?: string) => {
     const trimmed = (text ?? input).trim();
     if (!trimmed || parse.isPending) return;
     if (text !== undefined && text !== input) setInput(text);
-    // Fresh query → drop any accumulated turns so the LLM doesn't bleed
-    // context from the previous question into a different one.
-    setTurns([]);
+    setClarification(null);
+    setTranscript([]);
     setRefineInput('');
-    lastInputRef.current = trimmed;
+    conversationRef.current = undefined;
+    lastSubmissionRef.current = trimmed;
     parse.mutate({
       input: trimmed,
-      availableFields: [...NUMERIC_FIELDS],
+      index,
+      columns: columnDefs,
       existingRules: rules.map((r) => r.name),
-      existingColumns: columns.map((c) => c.name),
       symbol,
-      history: [],
+    });
+  };
+
+  const submitFollowup = (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || parse.isPending) return;
+    lastSubmissionRef.current = trimmed;
+    setClarification(null);
+    parse.mutate({
+      input: trimmed,
+      index,
+      columns: columnDefs,
+      existingRules: rules.map((r) => r.name),
+      symbol,
+      state: conversationRef.current,
     });
   };
 
   const submitRefine = () => {
     const trimmed = refineInput.trim();
-    if (!trimmed || parse.isPending || !result) return;
-    const nextTurns: AITurn[] = [
-      ...turns,
-      { userText: lastInputRef.current, assistantJson: JSON.stringify(result) },
-    ].slice(-4);
-    setTurns(nextTurns);
-    lastInputRef.current = trimmed;
+    if (!trimmed) return;
     setRefineInput('');
-    parse.mutate({
-      input: trimmed,
-      availableFields: [...NUMERIC_FIELDS],
-      existingRules: rules.map((r) => r.name),
-      existingColumns: columns.map((c) => c.name),
-      symbol,
-      history: nextTurns,
-    });
+    submitFollowup(trimmed);
   };
 
-  // Disambiguate by replaying the prior ambiguous response as an assistant
-  // turn, then sending the picked option's label+description as the user's
-  // next turn. The LLM sees the full conversation and resolves to a concrete
-  // rule/column — no grammar-mangling prefix on the original query.
   const submitOptionPick = (opt: AmbiguousOption) => {
     if (!result || parse.isPending) return;
     const followup = `${opt.label}: ${opt.description}`;
-    const nextTurns: AITurn[] = [
-      ...turns,
-      { userText: lastInputRef.current, assistantJson: JSON.stringify(result) },
-    ].slice(-4);
-    setTurns(nextTurns);
-    lastInputRef.current = followup;
     setRefineInput('');
-    parse.mutate({
-      input: followup,
-      availableFields: [...NUMERIC_FIELDS],
-      existingRules: rules.map((r) => r.name),
-      existingColumns: columns.map((c) => c.name),
-      symbol,
-      history: nextTurns,
-    });
+    submitFollowup(followup);
   };
 
+  const submitClarificationAnswer = (answer: string) => {
+    submitFollowup(answer);
+  };
+
+  // ─── Apply ───
   const apply = (intent: 'rule' | 'column', editedJson?: string) => {
     if (!result && !editedJson) return;
     try {
@@ -209,13 +226,12 @@ export function CommandPalette({
         onApplyColumn(built);
         setRecent(recordRecent({ query: input.trim(), intent: 'column', name: built.name }));
       }
-      setTurns([]);
+      setClarification(null);
+      setTranscript([]);
+      conversationRef.current = undefined;
       setRefineInput('');
-      lastInputRef.current = '';
       onClose();
     } catch (e) {
-      // Surface JSON parse failure inline by feeding it through the mutation
-      // error channel — the body switchboard will show ErrorBody.
       console.error('apply failed', e);
     }
   };
@@ -223,23 +239,27 @@ export function CommandPalette({
   const onInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key !== 'Enter' || e.shiftKey) return;
     e.preventDefault();
+    if (status === 'clarification') {
+      submitClarificationAnswer(input);
+      setInput('');
+      return;
+    }
     if (status === 'preview' && result) {
       if (result.intent === 'rule') apply('rule');
       else if (result.intent === 'column') apply('column');
-      // ambiguous → click an option
       return;
     }
-    submit();
+    submitFresh();
   };
 
-  // What the footer "↵ apply" hint should say in the current state
   const applyLabel =
-    status === 'preview' && result
-      ? result.intent === 'rule' ? 'apply rule'
-      : result.intent === 'column' ? 'add column'
-      : 'pick an option'
-      : input.trim() ? 'parse'
-      : '—';
+    status === 'clarification' ? 'answer'
+      : status === 'preview' && result
+        ? result.intent === 'rule' ? 'apply rule'
+          : result.intent === 'column' ? 'add column'
+            : 'pick an option'
+        : input.trim() ? 'parse'
+          : '—';
 
   if (!shouldRender) return null;
 
@@ -252,10 +272,6 @@ export function CommandPalette({
         maxHeight: '72vh',
         transition: position.frozen ? 'none' : 'left 80ms ease-out, top 80ms ease-out',
       };
-  // Mobile: bottom-anchored sheet — slides up from where the BottomBar's Ask
-  // button sits, leaves a peek of the table at the top, top corners rounded.
-  // Desktop: free-floating panel anchored at cursor or pinned coordinate;
-  // gets a soft fade so it doesn't snap into existence at the cursor.
   const wrapClass = position.isMobile
     ? `fixed z-[2000] left-0 right-0 bottom-0 max-h-[85vh] bg-bg-1 border-t border-x border-line-2 rounded-t-xl shadow-[0_-12px_48px_rgba(0,0,0,0.6)] overflow-hidden flex flex-col transition-transform duration-200 ease-out ${entered ? 'translate-y-0' : 'translate-y-full'}`
     : `fixed z-[2000] bg-bg-1 border border-line-2 rounded-xl shadow-[0_24px_64px_rgba(0,0,0,0.7)] overflow-hidden flex flex-col transition-opacity duration-150 ${entered ? 'opacity-100' : 'opacity-0'}`;
@@ -280,7 +296,7 @@ export function CommandPalette({
           <span className="block w-10 h-1 rounded-full bg-line-2" />
         </div>
       )}
-      {/* Input row */}
+
       <div className="flex items-center gap-2.5 px-4 h-[52px] border-b border-line shrink-0">
         <span className="text-accent text-base leading-none">✦</span>
         <input
@@ -288,20 +304,30 @@ export function CommandPalette({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onInputKeyDown}
-          placeholder="describe a rule or column…"
+          placeholder={
+            status === 'clarification'
+              ? 'answer the AI…'
+              : 'describe a rule or column…'
+          }
           className="flex-1 bg-transparent border-0 outline-none focus:outline-none focus:ring-0 text-ink text-[14px] placeholder:text-ink-3"
         />
         {status === 'parsing' && <ParsingDots />}
         <Kbd className="hidden md:inline-block">esc</Kbd>
       </div>
 
-      {/* Body — scrollable middle */}
       <div className="flex-1 overflow-y-auto">
         {status === 'idle' && (
-          <IdleBody recent={recent} onPick={(s) => submit(s)} onPickRecent={(e) => submit(e.query)} />
+          <IdleBody recent={recent} onPick={(s) => submitFresh(s)} onPickRecent={(e) => submitFresh(e.query)} />
         )}
         {status === 'parsing' && <ParsingBody />}
-        {status === 'error' && <ErrorBody message={error ?? 'Unknown error'} onPick={(s) => submit(s)} />}
+        {status === 'error' && <ErrorBody message={error ?? 'Unknown error'} onPick={(s) => submitFresh(s)} />}
+        {status === 'clarification' && clarification && (
+          <ClarificationBody
+            transcript={transcript}
+            question={clarification.question}
+            placeholder={input}
+          />
+        )}
         {status === 'preview' && result && editingJson === null && (
           <PreviewBody
             result={result}
@@ -334,9 +360,7 @@ export function CommandPalette({
         )}
       </div>
 
-      {/* Footer */}
       <div className="flex items-center justify-between px-4 h-9 border-t border-line bg-bg-1 shrink-0">
-        {/* Keyboard shortcuts — desktop only (mobile has no esc/cmd keys) */}
         <div className="hidden md:flex items-center gap-3 font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em]">
           <span className="inline-flex items-center gap-1">
             <Kbd size="xs">↵</Kbd> {applyLabel}
@@ -347,11 +371,44 @@ export function CommandPalette({
         </div>
         <div className="font-mono text-[10px] text-ink-4 inline-flex items-center gap-1.5 ml-auto">
           <span className="text-accent">✦</span>
-          <span>haiku · structured</span>
+          <span>haiku · tool-use</span>
         </div>
       </div>
     </div>
     </>
+  );
+}
+
+function ClarificationBody({
+  transcript, question,
+}: {
+  transcript: string[];
+  question: string;
+  placeholder: string;
+}) {
+  return (
+    <div className="px-4 py-4 border-t border-line space-y-3">
+      {transcript.length > 0 && (
+        <div className="space-y-1.5">
+          {transcript.map((t, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <span className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em] shrink-0 pt-0.5">you</span>
+              <span className="text-[12px] text-ink-2">{t}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex items-start gap-2 bg-bg-2 border border-line rounded-lg p-3">
+        <span className="text-accent text-sm leading-none pt-0.5">✦</span>
+        <div className="flex-1">
+          <div className="font-mono text-[10px] text-ink-3 uppercase tracking-[0.08em] mb-1">AI asks</div>
+          <div className="text-[12.5px] text-ink leading-snug">{question}</div>
+        </div>
+      </div>
+      <div className="text-[11px] text-ink-3 italic">
+        Type your answer above and press ↵ to continue.
+      </div>
+    </div>
   );
 }
 

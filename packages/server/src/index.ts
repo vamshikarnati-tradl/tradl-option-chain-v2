@@ -249,10 +249,11 @@ app.post('/api/ai/parse', async (req, res) => {
     const symbol = typeof body.symbol === 'string' ? body.symbol.toUpperCase() : undefined;
     const result = await parseAi({
       input: body.input,
-      availableFields: Array.isArray(body.availableFields) ? body.availableFields : [],
+      index: body.index,
+      columns: Array.isArray(body.columns) ? body.columns : [],
       existingRules: Array.isArray(body.existingRules) ? body.existingRules : [],
-      existingColumns: Array.isArray(body.existingColumns) ? body.existingColumns : [],
       symbol,
+      state: body.state,
     });
     if (res.writableEnded) return;
     res.json(result);
@@ -260,7 +261,7 @@ app.post('/api/ai/parse', async (req, res) => {
     if (res.writableEnded) return;
     if (err instanceof AIValidationError) {
       console.warn(`[ai/parse] validation failed: ${err.detail}`);
-      return res.status(422).json({ error: err.userError, detail: err.detail, draft: err.draft });
+      return res.status(422).json({ error: err.userError, detail: err.detail });
     }
     const message = err instanceof Error ? err.message : String(err);
     if (message.includes('ANTHROPIC_API_KEY')) {
@@ -288,8 +289,11 @@ app.post('/api/ai/refine-expression', async (req, res) => {
     const result = await refineExpression({
       currentExpression: body.currentExpression,
       instruction: body.instruction,
+      index: body.index,
+      columns: Array.isArray(body.columns) ? body.columns : [],
       symbol,
       kind,
+      state: body.state,
     });
     if (res.writableEnded) return;
     res.json(result);
@@ -299,10 +303,10 @@ app.post('/api/ai/refine-expression', async (req, res) => {
     if (message.includes('ANTHROPIC_API_KEY')) {
       return res.status(503).json({ error: 'AI is not configured on the server (set ANTHROPIC_API_KEY)' });
     }
-    const e = err as Error & { detail?: string; draft?: unknown };
-    if (e.detail || e.draft) {
-      console.warn(`[ai/refine-expression] validation failed: ${e.detail ?? message}`);
-      return res.status(422).json({ error: message, detail: e.detail, draft: e.draft });
+    const e = err as Error & { detail?: string };
+    if (e.detail) {
+      console.warn(`[ai/refine-expression] validation failed: ${e.detail}`);
+      return res.status(422).json({ error: message, detail: e.detail });
     }
     console.error('[ai/refine-expression] failed:', message);
     res.status(502).json({ error: message });

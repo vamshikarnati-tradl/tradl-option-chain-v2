@@ -1,33 +1,26 @@
-// Typed fetch wrapper for /api/ai/parse — server returns AI-parsed rule or
-// column. The server still emits the legacy multi-condition rule shape; this
-// adapter collapses it into the new single-expression `RuleDefinition`.
+// Client for /api/ai/parse — tool-use loop variant.
+//
+// Wire format:
+//   request:  { input, index, columns, existingRules?, symbol?, state? }
+//   response: { kind: 'result', result } | { kind: 'clarification', question, state }
+//
+// `state` is opaque to the client — when the server returns a clarification,
+// the client renders the question as an assistant turn, lets the user type
+// an answer, and posts the answer back with the same `state` echoed in the
+// request. The server replays the prior conversation and resumes its loop.
 
 import type {
   CustomColumnDefinition, RuleDefinition,
 } from '../core/types';
+import type { LlmIndex } from '../core/llm-index';
 
-interface RawConditionSide {
-  kind: 'field' | 'expr' | 'literal' | 'range';
-  field?: string;
-  expression?: string;
-  value?: number | [number, number];
-}
-
-interface RawCondition {
-  lhs: RawConditionSide;
-  operator: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq' | 'between';
-  rhs: RawConditionSide;
-}
-
-interface RawRule {
+export interface ParsedRulePayload {
   name: string;
   description: string;
-  logic: 'AND' | 'OR';
-  scope: 'call' | 'put' | 'row';
-  conditions: RawCondition[];
+  expression: string;
 }
 
-interface RawColumn {
+export interface ParsedColumnPayload {
   name: string;
   expression: string;
   format: { type: 'number' | 'percentage' | 'currency'; decimals: number };
@@ -43,10 +36,28 @@ export interface AIParseResult {
   intent: 'rule' | 'column' | 'ambiguous';
   humanReadable: string;
   confidence: number;
-  rule?: RawRule;
-  column?: RawColumn;
+  rule?: ParsedRulePayload;
+  column?: ParsedColumnPayload;
   options?: AmbiguousOption[];
-  repaired?: boolean;
+}
+
+/** Opaque conversation blob — the client never inspects it. */
+export type ConversationState = unknown;
+
+export type AIParseResponse =
+  | { kind: 'result'; result: AIParseResult }
+  | { kind: 'clarification'; question: string; state: ConversationState };
+
+export interface AIParseRequest {
+  input: string;
+  index: LlmIndex;
+  /** Saved columns the server needs for column-aware validation. The LLM
+   *  only sees what's encoded into `index.columns` — column expressions are
+   *  validation-only. */
+  columns: Array<{ id: string; name: string; expression: string }>;
+  existingRules?: string[];
+  symbol?: string;
+  state?: ConversationState;
 }
 
 export class AIParseError extends Error {
@@ -54,27 +65,14 @@ export class AIParseError extends Error {
     message: string,
     public readonly status?: number,
     public readonly detail?: string,
-    public readonly draft?: AIParseResult,
   ) {
     super(message);
   }
 }
 
-export interface AITurn {
-  userText: string;
-  assistantJson: string;
-}
-
-export interface AIParseRequest {
-  input: string;
-  availableFields: string[];
-  existingRules: string[];
-  existingColumns: string[];
-  symbol?: string;
-  history?: AITurn[];
-}
-
-export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSignal): Promise<AIParseResult> {
+export async function parseNaturalLanguage(
+  req: AIParseRequest, signal?: AbortSignal,
+): Promise<AIParseResponse> {
   const res = await fetch('/api/ai/parse', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -83,77 +81,29 @@ export async function parseNaturalLanguage(req: AIParseRequest, signal?: AbortSi
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new AIParseError(
-      body.error ?? `Parse failed (${res.status})`,
-      res.status,
-      body.detail,
-      body.draft,
-    );
+    throw new AIParseError(body.error ?? `Parse failed (${res.status})`, res.status, body.detail);
   }
-  return (await res.json()) as AIParseResult;
+  return (await res.json()) as AIParseResponse;
 }
 
-// ─── Adapters: AI legacy shape → new single-expression shape ───
+// ─── Adapters: AI payload → engine shapes ───
 
-const OP_SYM: Record<RawCondition['operator'], string> = {
-  gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '==', neq: '!=', between: 'between',
-};
-
-function sideToString(side: RawConditionSide): string {
-  if (side.kind === 'field' && side.field) return side.field;
-  if (side.kind === 'literal' && typeof side.value === 'number') return String(side.value);
-  if (side.kind === 'expr' && side.expression) return side.expression;
-  return '';
-}
-
-function conditionToExpr(c: RawCondition): string {
-  const lhs = sideToString(c.lhs);
-  if (!lhs) return '';
-  if (c.operator === 'between' && c.rhs.kind === 'range' && Array.isArray(c.rhs.value)) {
-    const [lo, hi] = c.rhs.value;
-    return `(${lhs} >= ${lo} && ${lhs} <= ${hi})`;
-  }
-  const rhs = sideToString(c.rhs);
-  if (!rhs) return '';
-  return `${lhs} ${OP_SYM[c.operator]} ${rhs}`;
-}
-
-function buildExpression(raw: RawRule): string {
-  const parts = raw.conditions.map(conditionToExpr).filter(Boolean);
-  if (parts.length === 0) return '';
-  if (parts.length === 1) return parts[0];
-  const joiner = raw.logic === 'OR' ? ' || ' : ' && ';
-  return parts.map((p) => `(${p})`).join(joiner);
-}
-
-/** Locate the bound literal of the first condition's rhs in the built
- *  expression string so the slider knows which char range it controls. */
-function firstLiteralOffset(raw: RawRule, expression: string): number | null {
-  const first = raw.conditions[0];
-  if (!first || first.rhs.kind !== 'literal' || typeof first.rhs.value !== 'number') return null;
-  const needle = String(first.rhs.value);
-  const idx = expression.indexOf(needle);
-  return idx >= 0 ? idx : null;
-}
-
-export function ruleFromAi(raw: RawRule, hue: number): RuleDefinition {
-  const expression = buildExpression(raw);
-  const offset = firstLiteralOffset(raw, expression);
-  const literal = raw.conditions[0]?.rhs.kind === 'literal' && typeof raw.conditions[0]?.rhs.value === 'number'
-    ? raw.conditions[0].rhs.value
-    : null;
+export function ruleFromAi(raw: ParsedRulePayload, hue: number): RuleDefinition {
   return {
     id: `ai_${Date.now().toString(36)}`,
     name: raw.name,
     description: raw.description,
     enabled: true,
-    expression,
+    expression: raw.expression,
     hue,
-    slider: offset !== null && literal !== null ? deriveSlider(literal, offset) : undefined,
+    // Slider derivation is best-effort — the legacy heuristic snapped to
+    // the first comparison RHS literal. With single expressions we'd need
+    // a tokenizer walk to find a representative literal; defer that for now
+    // (users can bind via click-a-literal in the Rule Builder).
   };
 }
 
-export function columnFromAi(raw: RawColumn): CustomColumnDefinition {
+export function columnFromAi(raw: ParsedColumnPayload): CustomColumnDefinition {
   return {
     id: `ai_col_${Date.now().toString(36)}`,
     name: raw.name,
@@ -161,12 +111,4 @@ export function columnFromAi(raw: RawColumn): CustomColumnDefinition {
     format: raw.format,
     side: 'general',
   };
-}
-
-function deriveSlider(literal: number, literalOffset: number) {
-  const abs = Math.abs(literal);
-  const step = abs >= 1000 ? Math.round(abs / 100) : abs >= 10 ? 0.5 : 0.05;
-  const min = literal < 0 ? Math.min(literal * 4, -100_000) : 0;
-  const max = literal < 0 ? 0 : Math.max(literal * 4, 100);
-  return { literalOffset, min, max, step, label: 'Threshold' };
 }

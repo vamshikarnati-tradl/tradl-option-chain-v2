@@ -4,11 +4,19 @@
 // — so what we accept here is what will actually execute.
 
 import {
-  NUMERIC_FIELDS, evaluate, extractDependencies, parseExpression, returnsBoolean,
-  type NumericField, type OptionChainRow,
+  NUMERIC_FIELDS, evaluate, extractDependencies, parseExpression,
+  parseExpressionLoose, resolveColumnRefs, returnsBoolean,
+  type Expr, type NumericField, type OptionChainRow,
 } from '@tradl/shared';
 
 const ALLOWED = new Set<string>(NUMERIC_FIELDS);
+
+/** Minimal shape of a saved column the validator needs to resolve refs. */
+export interface ColumnLike {
+  id: string;
+  name: string;
+  expression: string;
+}
 
 export interface ValidationFailure {
   ok: false;
@@ -124,17 +132,42 @@ export function isNumericField(name: string): name is NumericField {
   return ALLOWED.has(name);
 }
 
+// Column-aware compile helper. Uses the same loose-parse + resolve pipeline
+// as the client engine so `maxPainLevel > 0` validates correctly when the
+// user has a `maxPainLevel` column saved. Pre-compiles every column so the
+// evaluator's `columnRef` fallback can walk them recursively in the dry-run.
+function compileWithColumns(
+  expr: string,
+  columns: readonly ColumnLike[],
+): { ast: Expr; compiledColumns: Map<string, Expr> } {
+  const byName = new Map(columns.map((c) => [c.name, c as { id: string; name: string; expression: string }]));
+  const ast = resolveColumnRefs(parseExpressionLoose(expr), byName);
+  const compiledColumns = new Map<string, Expr>();
+  for (const c of columns) {
+    try {
+      compiledColumns.set(c.id, resolveColumnRefs(parseExpressionLoose(c.expression), byName));
+    } catch { /* skip broken column — its refs will resolve to NaN */ }
+  }
+  return { ast, compiledColumns };
+}
+
 /**
- * Validate a single-expression rule (new shape). Parses, checks fields,
- * requires a boolean root, and dry-runs against the sample row if provided.
+ * Validate a single-expression rule (new shape). Parses with column
+ * awareness, checks raw-field deps, requires a boolean root, and dry-runs
+ * against the sample row if provided.
  */
 export function validateBooleanExpression(
-  expr: string, sampleRow: OptionChainRow | null,
+  expr: string,
+  sampleRow: OptionChainRow | null,
+  columns: readonly ColumnLike[] = [],
 ): ValidationResult {
   if (!expr?.trim()) return fail('Expression is empty', 'The rule needs a non-empty expression.');
-  let ast;
+  let ast: Expr;
+  let compiledColumns: Map<string, Expr>;
   try {
-    ast = parseExpression(expr);
+    const compiled = compileWithColumns(expr, columns);
+    ast = compiled.ast;
+    compiledColumns = compiled.compiledColumns;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return fail(`Syntax error: ${msg}`, `Failed to parse "${expr}": ${msg}`);
@@ -152,7 +185,7 @@ export function validateBooleanExpression(
   }
   if (sampleRow) {
     try {
-      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow] });
+      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow], compiledColumns });
       if (!Number.isFinite(v)) {
         return fail(
           `Expression produced ${v} on sample row`,
@@ -172,12 +205,17 @@ export function validateBooleanExpression(
  * the boolean-root requirement — columns produce numeric values for display.
  */
 export function validateNumericExpression(
-  expr: string, sampleRow: OptionChainRow | null,
+  expr: string,
+  sampleRow: OptionChainRow | null,
+  columns: readonly ColumnLike[] = [],
 ): ValidationResult {
   if (!expr?.trim()) return fail('Expression is empty', 'The column needs a non-empty expression.');
-  let ast;
+  let ast: Expr;
+  let compiledColumns: Map<string, Expr>;
   try {
-    ast = parseExpression(expr);
+    const compiled = compileWithColumns(expr, columns);
+    ast = compiled.ast;
+    compiledColumns = compiled.compiledColumns;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return fail(`Syntax error: ${msg}`, `Failed to parse "${expr}": ${msg}`);
@@ -189,7 +227,7 @@ export function validateNumericExpression(
   }
   if (sampleRow) {
     try {
-      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow] });
+      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow], compiledColumns });
       if (!Number.isFinite(v)) {
         return fail(
           `Expression produced ${v} on sample row`,
@@ -203,3 +241,4 @@ export function validateNumericExpression(
   }
   return { ok: true };
 }
+

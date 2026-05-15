@@ -1,11 +1,14 @@
 import { useMutation } from '@tanstack/react-query';
-import { parseNaturalLanguage, type AIParseRequest, type AIParseResult } from '../services/aiParse';
+import {
+  parseNaturalLanguage, type AIParseRequest, type AIParseResponse,
+} from '../services/aiParse';
 
-// Wraps the /api/ai/parse POST as a mutation. We use the mutation surface
-// (rather than a query) because parsing is a user-triggered side-effecty
-// action with no cache value — each prompt is unique.
+// Wraps the /api/ai/parse POST as a mutation. The response is a union — a
+// successful `result` or a server-issued `clarification` (model asked the
+// user a question). Both flow through `data` on the mutation; the caller
+// switches on `data.kind`.
 export function useAiParse() {
-  return useMutation<AIParseResult, Error, AIParseRequest>({
+  return useMutation<AIParseResponse, Error, AIParseRequest>({
     mutationFn: (req) => parseNaturalLanguage(req),
   });
 }

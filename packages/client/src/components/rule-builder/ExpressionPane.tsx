@@ -104,6 +104,7 @@ export function ExpressionPane({
             currentExpression={expression}
             onApply={onExpressionChange}
             kind={kind}
+            availableColumns={availableColumns}
           />
         </div>
       ) : (

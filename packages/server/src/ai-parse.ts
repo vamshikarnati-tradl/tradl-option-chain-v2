@@ -1,84 +1,72 @@
+// /api/ai/parse — tool-use loop variant.
+//
+// The client posts:
+//   - input: user's natural-language request
+//   - index: compact catalog (categories → subgroups → fn names, fields, columns)
+//   - columns: raw saved-column defs (used for column-aware validation only)
+//   - symbol: ATM sample-row picker for dry-run
+//   - state: opaque blob returned on a prior clarification turn; replayed
+//            verbatim to resume the loop
+//
+// The server runs Claude with three tools (defined in prompts/tools.ts):
+//   getFunctionDetails  → resolves names against FUNCTION_CATALOG
+//   askUserToClarify    → terminates loop, surfaces as a `clarification`
+//                         response with the conversation state echoed back
+//   submitExpression    → terminates loop; server runs validateBoolean /
+//                         validateNumeric against the dry-run sample row.
+//                         A failed validation is fed back as a tool_result
+//                         so the model can self-repair (no separate retry
+//                         pass — the loop handles it naturally).
+
 import Anthropic from '@anthropic-ai/sdk';
+import { FUNCTION_CATALOG, type FunctionSpec } from '@tradl/shared';
 import { PARSE_SYSTEM_PROMPT } from './prompts/parse.js';
-import { PARSE_RESPONSE_SCHEMA } from './prompts/parse-schema.js';
-import { validateColumn, validateRule, type ValidationResult } from './ai-validator.js';
+import { PARSE_TOOLS } from './prompts/tools.js';
+import {
+  validateBooleanExpression, validateNumericExpression,
+  type ColumnLike, type ValidationResult,
+} from './ai-validator.js';
 import { getAtmRow } from './snapshot-store.js';
 
-// Lazy client init — server should boot fine without ANTHROPIC_API_KEY;
-// only the /api/ai/parse route fails when the key is missing.
 let client: Anthropic | null = null;
 function getClient(): Anthropic {
   if (client) return client;
-  if (!process.env.ANTHROPIC_API_KEY) {
-    throw new Error('ANTHROPIC_API_KEY is not set');
-  }
+  if (!process.env.ANTHROPIC_API_KEY) throw new Error('ANTHROPIC_API_KEY is not set');
   client = new Anthropic();
   return client;
 }
 
-// ─── Request / response types (mirror the client's expectations) ───
+const MAX_TOOL_ITERATIONS = 8;
 
-export interface AITurnEntry {
-  userText: string;
-  assistantJson: string;
-}
+// ─── Request / response types (mirror the client's expectations) ───
 
 export interface AIParseRequest {
   input: string;
-  availableFields: string[];
-  existingRules: string[];
-  existingColumns: string[];
-  // Identifies which symbol's most-recent snapshot the server should pick its
-  // dry-run sample row from. Optional — without a snapshot the validator skips
-  // the dry-run check (parse + field-allowlist still run).
+  /** Compact catalog index — `buildLlmIndex(columns)` on the client side. */
+  index: unknown;
+  /** Raw column defs (name + expression + id) used by the validator to
+   *  compile column references in dry-runs. NOT shown to the LLM directly
+   *  — the LLM only sees what's in `index`. */
+  columns?: ColumnLike[];
+  existingRules?: string[];
   symbol?: string;
-  // Prior conversation turns (oldest → newest). The server replays them as
-  // user/assistant pairs before the new user turn so the model can refine its
-  // previous answer. Capped to MAX_HISTORY_TURNS to bound payload + cost.
-  history?: AITurnEntry[];
+  /** Returned by the server when the previous call ended in clarification.
+   *  The client echoes it back unchanged on the follow-up turn. */
+  state?: ConversationState;
 }
 
-const MAX_HISTORY_TURNS = 4;
-
-// Thrown when the LLM's draft fails validation. The route handler converts it
-// into a 422 response. `detail` is the longer message used for the LLM repair
-// retry; `error` is the user-facing one-line summary.
-export class AIValidationError extends Error {
-  readonly status = 422;
-  constructor(
-    public readonly userError: string,
-    public readonly detail: string,
-    public readonly draft: AIParseResponse,
-  ) {
-    super(userError);
-    this.name = 'AIValidationError';
-  }
+export interface ConversationState {
+  messages: Anthropic.MessageParam[];
 }
 
-type Operator = 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'neq';
+export type AIParseResponse =
+  | { kind: 'result'; result: ParseResult }
+  | { kind: 'clarification'; question: string; state: ConversationState };
 
-interface ConditionLhs {
-  kind: 'field' | 'expr';
-  field?: string;
-  expression?: string;
-}
-interface ConditionRhs {
-  kind: 'literal' | 'field' | 'expr';
-  value?: number;
-  field?: string;
-  expression?: string;
-}
-interface Condition {
-  lhs: ConditionLhs;
-  operator: Operator;
-  rhs: ConditionRhs;
-}
 interface ParsedRule {
   name: string;
   description: string;
-  logic: 'AND' | 'OR';
-  scope: 'call' | 'put' | 'row';
-  conditions: Condition[];
+  expression: string;
 }
 interface ParsedColumn {
   name: string;
@@ -91,143 +79,289 @@ interface AmbiguousOption {
   description: string;
 }
 
-export interface AIParseResponse {
+export interface ParseResult {
   intent: 'rule' | 'column' | 'ambiguous';
   humanReadable: string;
-  // 0..1 — how confident the model is in its parse. Coarse signal driving
-  // the green/yellow/red confidence bar and the "best guess" warning banner.
   confidence: number;
   rule?: ParsedRule;
   column?: ParsedColumn;
   options?: AmbiguousOption[];
-  // Set when the server's self-repair retry produced this result (the first
-  // LLM draft failed validation and was corrected on a second pass). The
-  // client surfaces a subtle "AI corrected its draft" hint.
-  repaired?: boolean;
 }
 
-function buildUserMessage(req: AIParseRequest): string {
-  const lines = [`User input: "${req.input}"`];
-  if (req.existingRules.length) {
-    lines.push(`Active rules (avoid exact-name duplication): ${req.existingRules.join(', ')}`);
+export class AIValidationError extends Error {
+  readonly status = 422;
+  constructor(public readonly userError: string, public readonly detail: string) {
+    super(userError);
+    this.name = 'AIValidationError';
   }
-  if (req.existingColumns.length) {
-    // Saved columns can be referenced by name inside expressions, the same
-    // way raw data fields can. The model should prefer referencing an
-    // existing column over re-inlining its formula.
-    lines.push(`Active columns (reference by name; avoid exact-name duplication): ${req.existingColumns.join(', ')}`);
-  }
-  lines.push('Parse this and respond with the JSON object only.');
-  return lines.join('\n');
 }
 
-type Turn = { role: 'user' | 'assistant'; content: string };
+// ─── Tool input shapes (mirror the JSON schemas in prompts/tools.ts) ───
 
-async function callLlm(messages: Turn[]): Promise<{ parsed: AIParseResponse; rawJson: string; usage: Anthropic.Usage }> {
-  const c = getClient();
-  const response = (await c.messages.create({
-    model: 'claude-haiku-4-5',
-    max_tokens: 768,
-    system: PARSE_SYSTEM_PROMPT,
-    messages,
-    // `output_config` is the GA structured-output knob; cast to bypass the
-    // SDK's older typed params shape.
-    ...({
-      output_config: {
-        format: {
-          type: 'json_schema',
-          schema: PARSE_RESPONSE_SCHEMA as unknown as Record<string, unknown>,
-        },
-      },
-    } as Record<string, unknown>),
-  } as Anthropic.MessageCreateParams)) as Anthropic.Message;
-
-  const block = response.content[0];
-  if (block?.type !== 'text') {
-    throw new Error('Empty response from model');
-  }
-  const rawJson = block.text;
-  const parsed = JSON.parse(rawJson) as AIParseResponse;
-
-  if (parsed.column?.format) {
-    const d = parsed.column.format.decimals;
-    parsed.column.format.decimals = Math.max(0, Math.min(6, Math.round(d)));
-  }
-  if (typeof parsed.confidence === 'number') {
-    parsed.confidence = Math.max(0, Math.min(1, parsed.confidence));
-  } else {
-    parsed.confidence = 0.7;
-  }
-
-  return { parsed, rawJson, usage: response.usage };
+interface GetFunctionDetailsInput { names: string[] }
+interface AskUserToClarifyInput   { question: string }
+interface SubmitExpressionInput   {
+  intent: 'rule' | 'column' | 'ambiguous';
+  humanReadable: string;
+  confidence: number;
+  rule?: ParsedRule;
+  column?: ParsedColumn;
+  options?: AmbiguousOption[];
 }
 
-function logTiming(label: string, t0: number, usage: Anthropic.Usage, input: string): void {
-  console.log(
-    `[ai/parse] ${label} ${Date.now() - t0}ms · in=${usage.input_tokens} out=${usage.output_tokens}`
-    + (usage.cache_read_input_tokens ? ` cache_read=${usage.cache_read_input_tokens}` : '')
-    + ` · "${input.slice(0, 60)}${input.length > 60 ? '…' : ''}"`,
+// ─── Helpers ───
+
+function buildInitialUserMessage(req: AIParseRequest): string {
+  const parts = [
+    'User input:',
+    req.input,
+    '',
+    'Catalog index:',
+    JSON.stringify(req.index, null, 2),
+  ];
+  if (req.existingRules?.length) {
+    parts.push('', `Active rules (avoid exact-name duplicates): ${req.existingRules.join(', ')}`);
+  }
+  parts.push(
+    '',
+    'Pick the functions you need from the index, call getFunctionDetails to learn their argument shapes, then call submitExpression. Call askUserToClarify only if the request is genuinely ambiguous.',
   );
+  return parts.join('\n');
 }
 
-function buildRepairMessage(failure: { error: string; detail: string }, prevDraftJson: string): string {
-  return [
-    `Your previous response failed validation: ${failure.detail}`,
-    `Previous draft: ${prevDraftJson}`,
-    `Fix the issue and respond with the corrected JSON object only.`,
-  ].join('\n');
-}
-
-function historyTurns(req: AIParseRequest): Turn[] {
-  if (!req.history?.length) return [];
-  const slice = req.history.slice(-MAX_HISTORY_TURNS);
-  const out: Turn[] = [];
-  for (const h of slice) {
-    out.push({ role: 'user', content: h.userText });
-    out.push({ role: 'assistant', content: h.assistantJson });
+function resolveFunctionDetails(names: string[]): unknown[] {
+  const out: unknown[] = [];
+  for (const name of names) {
+    const spec = FUNCTION_CATALOG.find((f) => f.technicalName === name);
+    if (!spec) {
+      out.push({ name, error: 'Unknown function. Check spelling against the index.' });
+      continue;
+    }
+    if (spec.status !== 'live') {
+      out.push({
+        name,
+        error: `Function "${name}" is ${spec.status} — not currently runnable. Pick a 'live' function instead.`,
+      });
+      continue;
+    }
+    out.push(serializeFunctionSpec(spec));
   }
   return out;
 }
 
-export async function parseAi(req: AIParseRequest): Promise<AIParseResponse> {
-  const t0 = Date.now();
-  const userMsg = buildUserMessage(req);
-  const baseMsgs: Turn[] = [...historyTurns(req), { role: 'user', content: userMsg }];
-  const first = await callLlm(baseMsgs);
-  logTiming(req.history?.length ? 'refine' : 'draft', t0, first.usage, req.input);
-
-  const firstCheck = validateDraft(first.parsed, req.symbol);
-  if (firstCheck.ok) return first.parsed;
-
-  // First draft failed validation → one self-repair retry with the validator
-  // error fed back to the LLM as a fresh user turn.
-  const t1 = Date.now();
-  const repairMsgs: Turn[] = [
-    ...baseMsgs,
-    { role: 'assistant', content: first.rawJson },
-    { role: 'user', content: buildRepairMessage(firstCheck, first.rawJson) },
-  ];
-  const second = await callLlm(repairMsgs);
-  logTiming('repair', t1, second.usage, req.input);
-
-  const secondCheck = validateDraft(second.parsed, req.symbol);
-  if (secondCheck.ok) {
-    second.parsed.repaired = true;
-    return second.parsed;
-  }
-  throw new AIValidationError(secondCheck.error, secondCheck.detail, second.parsed);
+function serializeFunctionSpec(spec: FunctionSpec): unknown {
+  return {
+    name: spec.technicalName,
+    friendlyName: spec.friendlyName,
+    category: spec.category,
+    subgroup: spec.subgroup,
+    description: spec.kidDescription,
+    args: spec.args.map((a) => ({
+      name: a.name,
+      kind: a.kind,
+      description: a.description,
+      allowed: a.allowed,
+    })),
+    rest: spec.rest
+      ? { kind: spec.rest.kind, description: spec.rest.description, minCount: spec.rest.minCount }
+      : undefined,
+    returns: spec.returns,
+    example: spec.example,
+    exampleMeaning: spec.exampleMeaning,
+    notes: {
+      isSnapshotAware: spec.isSnapshotAware,
+      isTimeAware: spec.isTimeAware,
+      isHistorical: spec.isHistorical,
+    },
+  };
 }
 
-// Validate the parsed draft (rule/column expressions) against the shared parser,
-// the field allowlist, and a dry-run on the ATM sample row. Ambiguous drafts
-// have no expressions to validate so they pass through.
-function validateDraft(parsed: AIParseResponse, symbol: string | undefined): ValidationResult {
+function validateSubmission(
+  input: SubmitExpressionInput,
+  columns: readonly ColumnLike[],
+  symbol: string | undefined,
+): ValidationResult {
   const sample = symbol ? getAtmRow(symbol) : null;
-  if (parsed.intent === 'column' && parsed.column) {
-    return validateColumn(parsed.column, sample);
+  if (input.intent === 'rule') {
+    if (!input.rule) return { ok: false, error: 'rule payload missing', detail: 'intent="rule" but rule is undefined' };
+    return validateBooleanExpression(input.rule.expression, sample, columns);
   }
-  if (parsed.intent === 'rule' && parsed.rule) {
-    return validateRule(parsed.rule, sample);
+  if (input.intent === 'column') {
+    if (!input.column) return { ok: false, error: 'column payload missing', detail: 'intent="column" but column is undefined' };
+    return validateNumericExpression(input.column.expression, sample, columns);
+  }
+  // ambiguous — must carry options
+  if (!input.options?.length) {
+    return { ok: false, error: 'options missing', detail: 'intent="ambiguous" but options is empty. Provide 2–3 options or pick a concrete intent.' };
   }
   return { ok: true };
+}
+
+function clampConfidence(c: number): number {
+  if (typeof c !== 'number' || !Number.isFinite(c)) return 0.7;
+  return Math.max(0, Math.min(1, c));
+}
+
+function normalizeSubmission(input: SubmitExpressionInput): ParseResult {
+  const out: ParseResult = {
+    intent: input.intent,
+    humanReadable: input.humanReadable ?? '',
+    confidence: clampConfidence(input.confidence),
+  };
+  if (input.rule) out.rule = input.rule;
+  if (input.column) {
+    out.column = {
+      ...input.column,
+      format: {
+        type: input.column.format.type,
+        decimals: Math.max(0, Math.min(6, Math.round(input.column.format.decimals))),
+      },
+    };
+  }
+  if (input.options) out.options = input.options;
+  return out;
+}
+
+// ─── Tool-use loop ───
+
+export async function parseAi(req: AIParseRequest): Promise<AIParseResponse> {
+  const t0 = Date.now();
+  const c = getClient();
+
+  // Build (or resume) the message history. A resumed turn appends the user's
+  // clarification answer; the prior state already ends with an assistant
+  // askUserToClarify + a tool_result placeholder, so the new user message
+  // becomes a fresh turn the model reads as the answer.
+  let messages: Anthropic.MessageParam[];
+  if (req.state) {
+    messages = [...req.state.messages, { role: 'user', content: req.input }];
+  } else {
+    messages = [{ role: 'user', content: buildInitialUserMessage(req) }];
+  }
+
+  const columns = req.columns ?? [];
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
+
+  for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+    const response = await c.messages.create({
+      model: 'claude-haiku-4-5',
+      max_tokens: 1024,
+      system: PARSE_SYSTEM_PROMPT,
+      tools: PARSE_TOOLS,
+      messages,
+    });
+    totalInputTokens += response.usage.input_tokens;
+    totalOutputTokens += response.usage.output_tokens;
+
+    // Append the assistant turn verbatim — content blocks carry the tool_use
+    // blocks the next user turn must correlate against via tool_use_id.
+    messages.push({ role: 'assistant', content: response.content });
+
+    // Sometimes the model ends with plain text instead of a tool call (most
+    // common on vague queries — it tries to answer in prose). Nudge it back
+    // with a fresh user turn rather than failing the whole request.
+    if (response.stop_reason !== 'tool_use') {
+      const textBlock = response.content.find((b) => b.type === 'text');
+      const seen = textBlock && 'text' in textBlock ? textBlock.text.slice(0, 200) : '(no text)';
+      messages.push({
+        role: 'user',
+        content: `Your reply was plain text ("${seen}"). You must always end with a tool call — submitExpression (intent rule|column|ambiguous), askUserToClarify, or getFunctionDetails. Pick one and try again.`,
+      });
+      continue;
+    }
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    let terminated: { type: 'result'; data: ParseResult } | { type: 'clarification'; question: string } | null = null;
+
+    for (const block of response.content) {
+      if (block.type !== 'tool_use') continue;
+
+      if (block.name === 'getFunctionDetails') {
+        const inp = block.input as GetFunctionDetailsInput;
+        const details = resolveFunctionDetails(Array.isArray(inp?.names) ? inp.names : []);
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: JSON.stringify(details),
+        });
+        continue;
+      }
+
+      if (block.name === 'askUserToClarify') {
+        const inp = block.input as AskUserToClarifyInput;
+        const question = (inp?.question ?? '').toString().trim();
+        if (!question) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: 'Question was empty. Provide a non-empty question or proceed without clarification.',
+            is_error: true,
+          });
+          continue;
+        }
+        // Persist a placeholder tool_result so the message history stays
+        // valid for replay. The user's answer comes in as a fresh user turn.
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: '<awaiting user clarification>',
+        });
+        terminated = { type: 'clarification', question };
+        break;
+      }
+
+      if (block.name === 'submitExpression') {
+        const inp = block.input as SubmitExpressionInput;
+        const v = validateSubmission(inp, columns, req.symbol);
+        if (v.ok) {
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: block.id,
+            content: 'OK — submission accepted.',
+          });
+          terminated = { type: 'result', data: normalizeSubmission(inp) };
+          break;
+        }
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: block.id,
+          content: `Your previous submitExpression failed validation: ${v.detail}\nFix the issue and call submitExpression again.`,
+          is_error: true,
+        });
+        continue;
+      }
+
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: block.id,
+        content: `Unknown tool "${block.name}".`,
+        is_error: true,
+      });
+    }
+
+    messages.push({ role: 'user', content: toolResults });
+
+    if (terminated?.type === 'clarification') {
+      logTiming('clarify', t0, totalInputTokens, totalOutputTokens, req.input);
+      return {
+        kind: 'clarification',
+        question: terminated.question,
+        state: { messages },
+      };
+    }
+    if (terminated?.type === 'result') {
+      logTiming('result', t0, totalInputTokens, totalOutputTokens, req.input);
+      return { kind: 'result', result: terminated.data };
+    }
+  }
+
+  throw new Error(`Tool-use loop exceeded ${MAX_TOOL_ITERATIONS} iterations without a terminator.`);
+}
+
+function logTiming(label: string, t0: number, inputTokens: number, outputTokens: number, input: string): void {
+  console.log(
+    `[ai/parse] ${label} ${Date.now() - t0}ms · in=${inputTokens} out=${outputTokens}`
+    + ` · "${input.slice(0, 60)}${input.length > 60 ? '…' : ''}"`,
+  );
 }
