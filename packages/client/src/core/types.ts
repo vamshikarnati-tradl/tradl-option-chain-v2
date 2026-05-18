@@ -103,18 +103,48 @@ export interface ColumnResult {
   values: ColumnCellResult[];
 }
 
+// ───── Values (chain-wide scalars) ─────
+//
+// A "value" is a single scalar computed once per chain tick — not per row.
+// Examples: max-pain strike, total chain OI, ATM IV. Distinct from columns
+// (which produce a value per strike) and rules (which produce a boolean
+// per strike). Displayed in the value strip above the table.
+
+export interface ValueDefinition {
+  id: string;
+  /** Validated identifier; same rules as column names. */
+  name: string;
+  /** Optional free-form label shown in the value strip. Falls back to `name`. */
+  displayLabel?: string;
+  description?: string;
+  /** Expression must have NO outer-row field references. Outermost call is
+   *  typically chainSum/chainAvg/.../firstStrike/evalAt/atStrike/atm. */
+  expression: string;
+  format: ColumnFormat;
+}
+
+export interface ValueResult {
+  valueId: string;
+  /** The computed scalar. null when the expression errored or evaluated to a
+   *  non-finite number. */
+  value: number | null;
+  error?: string;
+}
+
 // ───── Worker protocol ─────
 
 export type WorkerInMessage =
   | { type: 'UPDATE_DATA'; rows: OptionChainRow[] }
   | { type: 'SET_RULES'; rules: RuleDefinition[] }
-  | { type: 'SET_COLUMNS'; columns: CustomColumnDefinition[] };
+  | { type: 'SET_COLUMNS'; columns: CustomColumnDefinition[] }
+  | { type: 'SET_VALUES'; values: ValueDefinition[] };
 
 export type WorkerOutMessage =
   | {
       type: 'COMPUTE_RESULTS';
       ruleResults: RuleResult[];
       columnResults: ColumnResult[];
+      valueResults: ValueResult[];
       computedAt: number;
       durationMs: number;
     }

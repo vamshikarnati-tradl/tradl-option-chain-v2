@@ -39,10 +39,16 @@ export type Expr =
   | (NodeRange & { kind: 'ternary'; cond: Expr; whenTrue: Expr; whenFalse: Expr })
   | (NodeRange & { kind: 'call'; name: BuiltinFn; args: Expr[] });
 
-/** Prefix that turns a field name into a "cross-strike" reference. Inside a
- *  `*OverStrikes(expression)` call, `cross_call_oi` reads from the strike
+/** Prefix that turns a field name into an iterated-strike reference. Inside a
+ *  `pivot*(expression)` call, `strike_call_oi` reads from the strike
  *  currently being iterated over, while plain `call_oi` reads from the outer
- *  row. Outside such a call, evaluating a `crossField` throws. */
+ *  row. Outside such a call, evaluating a `crossField` throws.
+ *
+ *  Note: the legacy `cross_` prefix is still accepted at parse time so old
+ *  saved expressions keep working (persistence migration rewrites them to
+ *  `strike_`). The canonical spelling everywhere new is `strike_`. */
+export const STRIKE_FIELD_PREFIX = 'strike_';
+/** Legacy alias. Treated identically by the parser. */
 export const CROSS_FIELD_PREFIX = 'cross_';
 
 export type BinaryOp =
@@ -360,12 +366,34 @@ class Parser {
           );
         }
 
-        // Per-arg kind check.
+        // Per-arg kind check. Trailing optional scope slot (only when the
+        // function opts in via acceptsScope) is validated as kind='scope'.
         for (let i = 0; i < args.length; i++) {
-          const argKind: ArgKind = i < spec.args.length
-            ? spec.args[i].kind
-            : spec.rest!.kind;
+          let argKind: ArgKind;
+          if (i < spec.args.length) {
+            argKind = spec.args[i].kind;
+          } else if (spec.acceptsScope && i === spec.args.length) {
+            argKind = 'scope';
+          } else if (spec.rest) {
+            argKind = spec.rest.kind;
+          } else {
+            // shouldn't happen given arity check above
+            argKind = 'expression';
+          }
           validateArg(name, i, argKind, args, pos);
+        }
+
+        // scope(predicate): predicate must yield boolean (same rule as the
+        // rule root). Statically enforced from the AST root kind + the
+        // function catalog. We accept loose-mode unresolved idents here too
+        // since the resolver may still rewrite them.
+        if (name === 'scope' && args.length === 1) {
+          const pred = args[0];
+          if (pred.kind !== 'unresolvedIdent' && !returnsBoolean(pred)) {
+            throw new Error(
+              `scope() predicate must be a boolean condition (e.g. strike_call_oi > 50000). It can't be a numeric expression. At ${pos}.`,
+            );
+          }
         }
 
         return this.mark({ kind: 'call', name, args }, pos);
@@ -378,19 +406,26 @@ class Parser {
       if (FIELD_SET.has(name)) {
         return this.mark({ kind: 'field', name: name as NumericField }, pos);
       }
-      if (name.startsWith(CROSS_FIELD_PREFIX)) {
-        const baseName = name.slice(CROSS_FIELD_PREFIX.length);
+      // Accept both the canonical `strike_` prefix and the legacy `cross_`
+      // alias. Persistence migrates old saved expressions to `strike_`; this
+      // dual-accept keeps in-flight expressions and any unmigrated callers
+      // working.
+      const strikePrefix = name.startsWith(STRIKE_FIELD_PREFIX)
+        ? STRIKE_FIELD_PREFIX
+        : name.startsWith(CROSS_FIELD_PREFIX) ? CROSS_FIELD_PREFIX : null;
+      if (strikePrefix !== null) {
+        const baseName = name.slice(strikePrefix.length);
         if (FIELD_SET.has(baseName)) {
           return this.mark({ kind: 'crossField', name: baseName as NumericField }, pos);
         }
-        // Unknown after the cross_ prefix. In loose mode the resolver gets
+        // Unknown after the strike_ prefix. In loose mode the resolver gets
         // a chance to rewrite this into a crossColumnRef. In strict mode we
         // throw at parse time (current behavior).
         if (this.loose) {
           return this.mark({ kind: 'unresolvedIdent', name: baseName, cross: true }, pos);
         }
         throw new Error(
-          `Unknown cross-field "${name}" at ${pos}. The part after "cross_" must be a known field (e.g. cross_call_oi, cross_strikePrice).`,
+          `Unknown strike-field "${name}" at ${pos}. The part after "strike_" must be a known field (e.g. strike_call_oi, strike_strikePrice).`,
         );
       }
       // Unknown bare identifier. Loose mode defers — the resolver decides if
@@ -460,6 +495,24 @@ function validateArg(
       }
       return;
     }
+    case 'scope': {
+      // The scope slot must be a `scope(<predicate>)` call. We don't try to
+      // recover by rewriting an expression into a scope — users get a clear
+      // error so the type is explicit at the call site.
+      if (arg.kind !== 'call' || arg.name !== 'scope') {
+        throw new Error(
+          `${argLabel} must be a scope(<predicate>) call. Wrap your filter in scope(...) (at ${pos}).`,
+        );
+      }
+      return;
+    }
+    case 'strikeRef': {
+      // The strikeRef slot accepts any expression — evalAt expects a number
+      // (the strike price), which can come from firstStrike/lastStrike/onlyStrike,
+      // a constant, atStrike-of-something, etc. Runtime checks the resulting
+      // strike exists in the chain.
+      return;
+    }
   }
 }
 
@@ -496,7 +549,7 @@ export function resolveColumnRefs(
           return replacement;
         }
         const at = e.start !== undefined ? ` at ${e.start}` : '';
-        const prefix = e.cross ? 'cross_' : '';
+        const prefix = e.cross ? 'strike_' : '';
         throw new Error(`Unknown identifier "${prefix}${e.name}"${at}`);
       }
       case 'unary':
@@ -545,6 +598,120 @@ export function returnsBoolean(expr: Expr): boolean {
     case 'unresolvedIdent':
     case 'duration':
     case 'stringLit':
+      return false;
+  }
+}
+
+// ─────── Value/column root-type checks ───────
+//
+// A "value" artifact is a single-scalar expression — produced when:
+//   1. The outermost operator is a chain* aggregator (or evalAt /
+//      firstStrike / lastStrike / onlyStrike / atm / atStrike), AND
+//   2. The expression contains NO outer-row field references anywhere.
+//
+// Field references that DON'T count as outer-row refs:
+//   - `crossField` (strike_*) — only valid inside a pivot* body and refers
+//     to the iterated strike.
+//   - `field` references inside a chain* call's body — bound to the
+//     iterated strike, not the outer row.
+//   - `fieldLit` (bare token, not evaluated against any row).
+//
+// Field references that DO count as outer-row refs:
+//   - `field` references outside any aggregator body.
+//   - `field` references inside a pivot* body (those ARE outer-row reads —
+//     pivot* by convention binds plain names to the outer row).
+//   - Any `columnRef` outside an aggregator body / inside a pivot* body.
+
+const VALUE_PRODUCING_FUNCTIONS: ReadonlySet<string> = new Set([
+  'chainSum', 'chainAvg', 'chainMedian', 'chainMin', 'chainMax',
+  'chainStddev', 'chainProduct', 'chainCount',
+  'firstStrike', 'lastStrike', 'onlyStrike', 'evalAt',
+  'atStrike', 'atm',
+]);
+
+const CHAIN_AGGREGATORS: ReadonlySet<string> = new Set([
+  'chainSum', 'chainAvg', 'chainMedian', 'chainMin', 'chainMax',
+  'chainStddev', 'chainProduct', 'chainCount',
+]);
+
+/** True iff the expression contains a plain field or column read that would
+ *  bind to the OUTER row at evaluation time. Used by the value-vs-column
+ *  classifier — values cannot have any outer-row references.
+ *
+ *  Binding rules per call:
+ *    - chain*(<body>, [scope])       : body rebinds plain → iterated; scope body uses pivot binding (plain → outer)
+ *    - pivot*(<body>, [scope])       : body uses pivot binding (plain → outer); scope body same
+ *    - evalAt(<body>, <strikeRef>)   : body rebinds plain → iterated; strikeRef arg keeps caller binding
+ *    - firstStrike/lastStrike/onlyStrike(<scope>) : scope body uses pivot binding
+ *    - scope(<predicate>)            : predicate body uses pivot binding (plain → outer)
+ *    - anything else                 : args inherit caller binding
+ */
+export function referencesOuterRow(expr: Expr): boolean {
+  const walk = (e: Expr, inChainBody: boolean): boolean => {
+    switch (e.kind) {
+      case 'field':
+      case 'columnRef':
+        return !inChainBody;
+      case 'crossField':
+      case 'crossColumnRef':
+      case 'fieldLit':
+      case 'num': case 'const': case 'duration': case 'stringLit':
+      case 'unresolvedIdent':
+        return false;
+      case 'unary':
+        return walk(e.arg, inChainBody);
+      case 'binary':
+        return walk(e.left, inChainBody) || walk(e.right, inChainBody);
+      case 'ternary':
+        return walk(e.cond, inChainBody)
+          || walk(e.whenTrue, inChainBody)
+          || walk(e.whenFalse, inChainBody);
+      case 'call': {
+        const isChainRebind = CHAIN_AGGREGATORS.has(e.name) || e.name === 'evalAt';
+        const isScope = e.name === 'scope';
+        for (let i = 0; i < e.args.length; i++) {
+          let childInChain: boolean;
+          if (isScope) {
+            // scope() predicate uses pivot binding (plain field = outer
+            // row) regardless of where the scope sits. A scope reaching for
+            // outer fields is intentional (anchor to the rendered row).
+            childInChain = false;
+          } else if (isChainRebind && i === 0) {
+            // chain*/evalAt body rebinds plain field names to the iterated
+            // strike. The body is always argument 0.
+            childInChain = true;
+          } else {
+            childInChain = inChainBody;
+          }
+          if (walk(e.args[i], childInChain)) return true;
+        }
+        return false;
+      }
+    }
+  };
+  return walk(expr, false);
+}
+
+/** True iff the expression is a valid "value" artifact root — a single
+ *  scalar, with no outer-row dependencies. */
+export function returnsValue(expr: Expr): boolean {
+  if (referencesOuterRow(expr)) return false;
+  // Outermost must be either a value-producing call, a literal/constant, or
+  // math/logic combining value-typed sub-expressions.
+  switch (expr.kind) {
+    case 'num': case 'const': return true;
+    case 'call':
+      return VALUE_PRODUCING_FUNCTIONS.has(expr.name)
+        // Math/logic builtins are scalar if all args are — referencesOuterRow
+        // already vetoed any outer-row leakage.
+        || ['abs','round','floor','ceil','sqrt','pow','log','exp','sign',
+            'min','max','sum','avg','median','stddev','variance','range','product',
+            'clamp','lerp','ifelse','any','all','count'].includes(expr.name);
+    case 'binary':
+    case 'unary':
+    case 'ternary':
+      return true; // already passed referencesOuterRow
+    default:
       return false;
   }
 }

@@ -5,7 +5,7 @@
 
 import {
   NUMERIC_FIELDS, evaluate, extractDependencies, parseExpression,
-  parseExpressionLoose, resolveColumnRefs, returnsBoolean,
+  parseExpressionLoose, resolveColumnRefs, returnsBoolean, referencesOuterRow,
   type Expr, type NumericField, type OptionChainRow,
 } from '@tradl/shared';
 
@@ -204,6 +204,56 @@ export function validateBooleanExpression(
  * Validate a single-expression column. Same as the boolean validator minus
  * the boolean-root requirement — columns produce numeric values for display.
  */
+/**
+ * Validate a single-expression VALUE (chain-wide scalar). Like the numeric
+ * validator plus the value-specific constraint: the expression must NOT
+ * reference any outer-row fields. Outermost is typically a chain*
+ * aggregator, firstStrike/lastStrike/onlyStrike, evalAt, atStrike, or atm.
+ */
+export function validateValueExpression(
+  expr: string,
+  sampleRow: OptionChainRow | null,
+  columns: readonly ColumnLike[] = [],
+): ValidationResult {
+  if (!expr?.trim()) return fail('Expression is empty', 'The value needs a non-empty expression.');
+  let ast: Expr;
+  let compiledColumns: Map<string, Expr>;
+  try {
+    const compiled = compileWithColumns(expr, columns);
+    ast = compiled.ast;
+    compiledColumns = compiled.compiledColumns;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return fail(`Syntax error: ${msg}`, `Failed to parse "${expr}": ${msg}`);
+  }
+  if (referencesOuterRow(ast)) {
+    return fail(
+      'Value expression references outer-row fields',
+      `Expression "${expr}" reads outer-row fields, which would make it per-row, not a chain-wide value. Use chain*/firstStrike/evalAt to keep it scalar.`,
+    );
+  }
+  const deps = extractDependencies(ast);
+  for (const d of deps) {
+    const f = validateField(d as string, 'value expression');
+    if (f) return f;
+  }
+  if (sampleRow) {
+    try {
+      const v = evaluate(ast, sampleRow, { snapshot: [sampleRow], compiledColumns });
+      if (!Number.isFinite(v)) {
+        return fail(
+          `Value produced ${v} on sample chain`,
+          `Expression "${expr}" evaluated to ${v} (NaN/Infinity). Likely division by zero or invalid math.`,
+        );
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return fail(`Runtime error: ${msg}`, `Evaluating "${expr}" threw: ${msg}`);
+    }
+  }
+  return { ok: true };
+}
+
 export function validateNumericExpression(
   expr: string,
   sampleRow: OptionChainRow | null,

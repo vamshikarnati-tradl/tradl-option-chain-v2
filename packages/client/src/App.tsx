@@ -5,6 +5,7 @@ import { RulesPanel } from './components/RulesPanel';
 import { ColumnsPanel } from './components/ColumnsPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { BottomBar } from './components/BottomBar';
+import { ValueStrip } from './components/ValueStrip';
 import { useOptionChain } from './hooks/useOptionChain';
 import { useComputeEngine } from './hooks/useComputeEngine';
 import { useExpiries } from './hooks/useExpiries';
@@ -15,10 +16,13 @@ import { usePrevSnapshot } from './hooks/usePrevSnapshot';
 import { useSessionBaseSpot } from './hooks/useSessionBaseSpot';
 import { usePersistedToggle } from './hooks/usePersistedToggle';
 import { useIsTablet } from './hooks/useMediaQuery';
-import { loadColumns, loadRules, saveColumns, saveRules } from './core/persistence';
+import {
+  loadColumns, loadRules, loadValues,
+  saveColumns, saveRules, saveValues,
+} from './core/persistence';
 import { indexColumnResults, indexRuleResults } from './core/result-index';
 import { STORAGE_KEYS } from './core/storage-keys';
-import type { CustomColumnDefinition, RuleDefinition } from './core/types';
+import type { CustomColumnDefinition, RuleDefinition, ValueDefinition } from './core/types';
 
 const SYMBOLS = ['NIFTY', 'BANKNIFTY', 'FINNIFTY', 'MIDCPNIFTY'] as const;
 type SymbolName = typeof SYMBOLS[number];
@@ -29,6 +33,7 @@ export function App() {
 
   const [rules, setRules] = useState<RuleDefinition[]>(() => loadRules());
   const [columns, setColumns] = useState<CustomColumnDefinition[]>(() => loadColumns());
+  const [values, setValues] = useState<ValueDefinition[]>(() => loadValues());
 
   const [rulesOpen, setRulesOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -42,6 +47,7 @@ export function App() {
 
   useEffect(() => saveRules(rules), [rules]);
   useEffect(() => saveColumns(columns), [columns]);
+  useEffect(() => saveValues(values), [values]);
 
   const openRules = () => { setRulesOpen((o) => !o); setColumnsOpen(false); };
   const openColumns = () => { setColumnsOpen((o) => !o); setRulesOpen(false); };
@@ -55,7 +61,11 @@ export function App() {
   }, [expiries]);
 
   const data = useOptionChain(symbol);
-  const compute = useComputeEngine(data.rows, rules, columns);
+  const compute = useComputeEngine(data.rows, rules, columns, values);
+  // Avoid the no-unused-vars warning for now — `setValues` is wired to a
+  // future Values panel; for v1 the predefined list is what ships and
+  // localStorage persists user edits.
+  void setValues;
 
   const prevSnapshot = usePrevSnapshot(data.rows);
   const { spotChange, spotPct } = useSessionBaseSpot(data.underlyingValue);
@@ -123,6 +133,7 @@ export function App() {
             {data.error}
           </div>
         )}
+        <ValueStrip values={values} results={compute.valueResults} />
         <OptionChainTable
           rows={data.rows}
           prevRowsByStrike={prevSnapshot}

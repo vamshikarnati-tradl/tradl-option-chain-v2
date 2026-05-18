@@ -82,6 +82,15 @@ function defaultForArg(arg: ArgSpec): string {
       return "'AVG'";
     case "expression":
       return "0";
+    case "scope":
+      // Inserted as a placeholder when the scope slot is included in the
+      // snippet. Defaults to a common predicate (high-OI strikes) the user
+      // can swap. `strike_*` reads the iterated strike.
+      return "scope(strike_call_oi > 50000)";
+    case "strikeRef":
+      // Default points at the max-call-OI strike — the most common
+      // "anchor on a notable strike" pattern.
+      return "firstStrike(scope(strike_call_oi == chainMax(call_oi)))";
   }
 }
 

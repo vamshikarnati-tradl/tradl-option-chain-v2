@@ -110,6 +110,62 @@ export function rewriteIdent(source: string, from: string, to: string): RewriteR
   return { source: out, offsets };
 }
 
+/** Map of legacy function names → their canonical replacements introduced
+ *  by the chain-vs-pivot refactor. Applied lazily on load by `migrateExpression`. */
+const LEGACY_FUNCTION_RENAMES: Record<string, string> = {
+  sumStrikes: 'chainSum',
+  avgStrikes: 'chainAvg',
+  medianStrikes: 'chainMedian',
+  minStrikes: 'chainMin',
+  maxStrikes: 'chainMax',
+  stddevStrikes: 'chainStddev',
+  sumOverStrikes: 'pivotSum',
+  avgOverStrikes: 'pivotAvg',
+  productOverStrikes: 'pivotProduct',
+  maxOverStrikes: 'pivotMax',
+  minOverStrikes: 'pivotMin',
+  medianOverStrikes: 'pivotMedian',
+  countOverStrikes: 'pivotCount',
+};
+
+/** One-shot migration applied to every saved expression on load:
+ *    - `cross_*` field/column refs → `strike_*`
+ *    - `*Strikes` family → `chain*`
+ *    - `*OverStrikes` family → `pivot*`
+ *  Semantics are preserved across the rename (both sides bind plain field
+ *  names to the same row they used to).
+ *
+ *  Returns the rewritten source plus the offset table — callers reflow
+ *  slider literal offsets through the table. The empty-result optimisation
+ *  short-circuits when nothing changed. */
+export function migrateExpression(source: string): RewriteResult {
+  const tokens = tokenizeFlat(source);
+  let out = '';
+  const offsets: Array<{ oldStart: number; newStart: number }> = [];
+  let mutated = false;
+  for (const tok of tokens) {
+    offsets.push({ oldStart: tok.start, newStart: out.length });
+    if (tok.ident !== undefined) {
+      const legacyFn = LEGACY_FUNCTION_RENAMES[tok.ident];
+      if (legacyFn) {
+        out += legacyFn;
+        mutated = true;
+        continue;
+      }
+      if (tok.ident.startsWith('cross_')) {
+        out += 'strike_' + tok.ident.slice('cross_'.length);
+        mutated = true;
+        continue;
+      }
+    }
+    out += source.slice(tok.start, tok.end);
+  }
+  offsets.push({ oldStart: source.length, newStart: out.length });
+  return mutated
+    ? { source: out, offsets }
+    : { source, offsets: [{ oldStart: 0, newStart: 0 }] };
+}
+
 /**
  * Translate a char offset from the pre-rewrite source to the post-rewrite
  * source. Uses the offset table from `rewriteIdent`. If the old offset

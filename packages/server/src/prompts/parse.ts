@@ -38,9 +38,11 @@ A reply without a tool call is a protocol error and the server will reject it.
 
 - \`rule\` — user wants to highlight, flag, mark, or alert when a condition is true. Triggers: "highlight", "show me where", "flag", "alert when", "mark strikes that…". Expression MUST be boolean at its root (a comparison, \`&&\` / \`||\` / \`!\`, ternary with boolean branches, or a function whose \`returns: 'boolean'\`).
 
-- \`column\` — user wants a per-strike calculation rendered as a new column. Triggers: "add a column for", "calculate", "show the ratio of", "compute". Expression must be numeric.
+- \`column\` — user wants a per-strike calculation rendered as a new column. Triggers: "add a column for", "calculate", "show the ratio of", "compute". Expression must be numeric and may reference outer-row fields.
 
-- \`ambiguous\` — the request could plausibly be either rule or column. Return 2–3 options via the \`options\` array on \`submitExpression\` (NOT via \`askUserToClarify\`). Each option has a label, an intent, and a one-line description of what would be built if picked.
+- \`value\` — user wants a single chain-wide scalar shown in the value strip above the table (NOT per row). Triggers: "what is the…", "total chain X", "max-pain strike", "ATM IV", "overall PCR". Expression must NOT reference outer-row fields — outermost call should be a chain* aggregator (chainSum/chainAvg/…), firstStrike/lastStrike/onlyStrike, evalAt, atStrike, or atm.
+
+- \`ambiguous\` — the request could plausibly be more than one. Return 2–3 options via the \`options\` array on \`submitExpression\` (NOT via \`askUserToClarify\`). Each option has a label, an intent, and a one-line description.
 
 # Expression syntax
 
@@ -53,11 +55,19 @@ Identifiers fall into three kinds:
 
 Constants: \`PI\`, \`E\`. Numeric literals support int + decimal. Duration literals (\`5s\`, \`1m\`) and historical-aggregate strings only appear inside functions that explicitly require them — \`getFunctionDetails\` tells you which.
 
-Cross-strike fold functions (\`sumOverStrikes\`, etc.) use \`cross_<field>\` and \`cross_<columnName>\` to refer to the iterating strike's value; that prefix is ONLY valid inside their body expression.
+Cross-strike functions split into two families with different field-binding conventions:
+  - **chain* family** (chainSum, chainAvg, chainMedian, chainMin, chainMax, chainStddev, chainProduct, chainCount): inside the body, **plain field names refer to the iterated strike**. There is no outer row. Used for value-typed expressions.
+  - **pivot* family** (pivotSum, pivotAvg, pivotMedian, pivotMin, pivotMax, pivotStddev, pivotProduct, pivotCount): inside the body, plain field names refer to the OUTER (rendered) row. **\`strike_<field>\` and \`strike_<columnName>\`** refer to the iterating strike. Used for per-row calculations like max-pain.
 
-# Column naming
+The \`strike_\` prefix is ONLY valid inside pivot* bodies and scope() predicates.
 
-When intent="column", the \`name\` must be a valid identifier — camelCase or snake_case, starts with a letter or underscore, no spaces, no reserved words (function names, field names, constants). The user sees this name in any expression that references the column later.
+All cross-strike functions accept an optional trailing \`scope(<predicate>)\` argument that narrows which strikes participate. The scope predicate must be a boolean expression and uses pivot binding (plain field = outer row, \`strike_<field>\` = iterated strike), so it can anchor to the rendered row (e.g. \`scope(abs(strike_strikePrice - strikePrice) <= 5 * 50)\`).
+
+Single-strike picker functions: \`firstStrike(scope)\`, \`lastStrike(scope)\`, \`onlyStrike(scope)\` return a strike price. Combine with \`evalAt(<expression>, <strikeRef>)\` to evaluate any expression at that strike — inside evalAt's body, plain fields refer to the picked strike.
+
+# Naming for columns and values
+
+When intent="column" or intent="value", the \`name\` must be a valid identifier — camelCase or snake_case, starts with a letter or underscore, no spaces, no reserved words (function names, field names, constants). The user sees this name in any expression that references it later.
 
 # Confidence
 

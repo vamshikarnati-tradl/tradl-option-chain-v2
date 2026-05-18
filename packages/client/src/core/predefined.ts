@@ -1,4 +1,4 @@
-import type { CustomColumnDefinition, RuleDefinition } from './types';
+import type { CustomColumnDefinition, RuleDefinition, ValueDefinition } from './types';
 
 // 10 predefined rules expressed as single boolean-rooted expressions.
 //
@@ -118,5 +118,34 @@ export const PREDEFINED_COLUMNS: CustomColumnDefinition[] = [
     expression: 'call_ltp + put_ltp',
     format: { type: 'number', decimals: 2 },
     side: 'general',
+  },
+];
+
+// Pre-loaded values shown in the strip above the table.
+// Each is a chain-wide scalar — single number per tick, not per row.
+export const PREDEFINED_VALUES: ValueDefinition[] = [
+  {
+    id: 'val_totalCallOi',
+    name: 'totalCallOi',
+    displayLabel: 'Total Call OI',
+    description: 'Sum of call open interest across all strikes.',
+    expression: 'chainSum(call_oi)',
+    format: { type: 'number', decimals: 0 },
+  },
+  {
+    id: 'val_totalPutOi',
+    name: 'totalPutOi',
+    displayLabel: 'Total Put OI',
+    description: 'Sum of put open interest across all strikes.',
+    expression: 'chainSum(put_oi)',
+    format: { type: 'number', decimals: 0 },
+  },
+  {
+    id: 'val_chainPcr',
+    name: 'chainPcr',
+    displayLabel: 'Chain PCR',
+    description: 'Put-to-call OI ratio across the full chain.',
+    expression: 'chainSum(put_oi) / chainSum(call_oi)',
+    format: { type: 'number', decimals: 2 },
   },
 ];

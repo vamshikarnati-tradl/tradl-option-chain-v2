@@ -3,6 +3,7 @@
 export const STORAGE_KEYS = {
   rules: 'tradl.rules.v1',
   columns: 'tradl.columns.v1',
+  values: 'tradl.values.v1',
   paletteRecent: 'tradl.palette.recent',
   theme: 'tradl.theme',
   expanded: 'tradl.expanded',

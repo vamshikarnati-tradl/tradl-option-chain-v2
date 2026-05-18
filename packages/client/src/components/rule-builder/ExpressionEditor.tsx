@@ -38,7 +38,8 @@ type TokKind =
   | 'op-compare' | 'op-logical' | 'op-arith'
   | 'bracket' | 'punct' | 'plain';
 
-const CROSS_PREFIX = 'cross_';
+const STRIKE_PREFIX = 'strike_';
+const LEGACY_CROSS_PREFIX = 'cross_';
 
 interface Tok {
   kind: TokKind;
@@ -123,14 +124,18 @@ function tokenize(src: string, columnNames: ReadonlySet<string>): Tok[] {
         kind = spec ? FN_CATEGORY_CLASS[spec.category] ?? 'fn-math' : 'plain';
       } else if (name === 'PI' || name === 'E') {
         kind = 'const';
-      } else if (name.startsWith(CROSS_PREFIX)) {
-        // Strip the `cross_` prefix and look up the underlying field's group.
-        // The cross-tinted variant uses italic + slight muting in CSS to mark
-        // "this reads from another strike."
-        const base = FIELD_BY_NAME.get(name.slice(CROSS_PREFIX.length));
+      } else if (name.startsWith(STRIKE_PREFIX) || name.startsWith(LEGACY_CROSS_PREFIX)) {
+        // Strip the iterated-strike prefix (canonical `strike_` or legacy
+        // `cross_`) and look up the underlying field's group. The cross-tinted
+        // variant uses italic + slight muting in CSS to mark "this reads from
+        // another strike."
+        const prefixLen = name.startsWith(STRIKE_PREFIX)
+          ? STRIKE_PREFIX.length : LEGACY_CROSS_PREFIX.length;
+        const baseName = name.slice(prefixLen);
+        const base = FIELD_BY_NAME.get(baseName);
         if (base) {
           kind = `cross-${FIELD_GROUP_CLASS[base.group]}` as TokKind;
-        } else if (columnNames.has(name.slice(CROSS_PREFIX.length))) {
+        } else if (columnNames.has(baseName)) {
           kind = 'cross-column';
         } else {
           kind = 'plain';

@@ -8,21 +8,26 @@ import {
 import type {
   ColumnResult, CustomColumnDefinition,
   OptionChainRow, RuleDefinition, RuleResult,
+  ValueDefinition, ValueResult,
 } from '../core/types';
 
 export interface ComputeState {
   ruleResults: RuleResult[];
   columnResults: ColumnResult[];
+  valueResults: ValueResult[];
   stats: ComputeStats | null;
   configErrors: ConfigErrors;
 }
 
-const EMPTY_ERRORS: ConfigErrors = { ruleErrors: [], columnErrors: [], cycleErrors: [] };
+const EMPTY_ERRORS: ConfigErrors = {
+  ruleErrors: [], columnErrors: [], valueErrors: [], cycleErrors: [],
+};
 
 export function useComputeEngine(
   rows: OptionChainRow[],
   rules: RuleDefinition[],
   columns: CustomColumnDefinition[],
+  values: ValueDefinition[],
 ): ComputeState {
   // Lazy ref so the bridge is created exactly once per mounted component
   // and survives StrictMode's mount → unmount → remount dance in dev.
@@ -40,20 +45,24 @@ export function useComputeEngine(
     return () => { off1(); off2(); };
   }, [bridge]);
 
-  // Columns ship FIRST. Rule compilation (next effect) resolves column
-  // references against the engine's stored columnDefs — if rules fired
-  // first on mount, every `maxPain`-style identifier would compile against
-  // an empty columns map and surface as "Unknown identifier."
+  // Columns ship FIRST. Rule + value compilation (next effects) resolve
+  // column references against the engine's stored columnDefs — if either
+  // fired first on mount, every `maxPain`-style identifier would compile
+  // against an empty columns map and surface as "Unknown identifier."
   useEffect(() => {
     bridge.setColumns(columns);
   }, [bridge, columns]);
 
-  // Rules depend on columns for name resolution. Re-send whenever either
-  // rules OR columns change — a column rename should re-resolve any rule
-  // that references it, even when the rules array itself didn't change.
+  // Rules and values both depend on columns for name resolution. Re-send
+  // whenever either set changes OR columns change — a column rename should
+  // re-resolve any rule/value that references it.
   useEffect(() => {
     bridge.setRules(rules);
   }, [bridge, rules, columns]);
+
+  useEffect(() => {
+    bridge.setValues(values);
+  }, [bridge, values, columns]);
 
   useEffect(() => {
     if (rows.length === 0) return;
@@ -66,6 +75,7 @@ export function useComputeEngine(
     () => ({
       ruleResults: output?.ruleResults ?? [],
       columnResults: output?.columnResults ?? [],
+      valueResults: output?.valueResults ?? [],
       stats: output?.stats ?? null,
       configErrors: errors,
     }),

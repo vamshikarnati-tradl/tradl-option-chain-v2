@@ -124,20 +124,90 @@ function aggregate(values: number[], op: 'sum' | 'avg' | 'median' | 'min' | 'max
   }
 }
 
-/** Iterate the snapshot, set each row as `crossRow`, evaluate the body, and
- *  collect finite results. Per-row evaluation errors are swallowed so one
- *  bad strike doesn't sink the whole fold. */
-function foldStrikes(
-  body: Expr, outerRow: OptionChainRow, ctx: EvalContext, fnName: string,
-): number[] {
+/** Resolve the strike iteration domain for a crossStrike function. Honours
+ *  a trailing `scope(<predicate>)` argument if present; otherwise returns
+ *  the full snapshot. `scopeArgIdx` is the position the scope() call would
+ *  occupy (typically `spec.args.length`). */
+function scopeStrikes(
+  args: Expr[], scopeArgIdx: number, ctx: EvalContext, outerRow: OptionChainRow, fnName: string,
+): readonly OptionChainRow[] {
   const snap = requireSnapshot(ctx, fnName);
+  const scopeArg = args[scopeArgIdx];
+  if (!scopeArg) return snap;
+  if (scopeArg.kind !== 'call' || scopeArg.name !== 'scope') return snap;
+  return filterByScope(scopeArg.args[0], snap, outerRow, ctx);
+}
+
+/** Evaluate a scope predicate against each row in the snapshot and return
+ *  the subset where it's truthy. The predicate sees the iterated row as the
+ *  primary row (plain field names = iterated strike) AND the outer row as
+ *  `crossRow` so users can anchor scopes like
+ *  `scope(abs(strike_strikePrice - strikePrice) <= 5 * 50)`.
+ *
+ *  Wait — that example *uses* `strike_strikePrice` for the iterated strike
+ *  and a plain `strikePrice` for the outer row, so the binding is the
+ *  pivot convention. Yes — scope predicates use pivot binding so they can
+ *  anchor to the rendered row when relevant. Per-row results then bind to
+ *  whatever family they sit inside.
+ *
+ *  Eval errors per row → strike excluded (skip semantics). */
+function filterByScope(
+  predicate: Expr, snap: readonly OptionChainRow[], outerRow: OptionChainRow, ctx: EvalContext,
+): OptionChainRow[] {
+  const out: OptionChainRow[] = [];
+  for (const row of snap) {
+    const inner: InternalContext = { ...(ctx as InternalContext), crossRow: row };
+    try {
+      const v = evaluate(predicate, outerRow, inner);
+      if (Number.isFinite(v) && v !== 0) out.push(row);
+    } catch { /* skip */ }
+  }
+  return out;
+}
+
+/** firstStrike / lastStrike / onlyStrike: extract the rows whose predicate
+ *  (their single `scope(...)` arg) passes, in snapshot order. */
+function scopePassingStrikes(
+  scopeArg: Expr, outerRow: OptionChainRow, ctx: EvalContext, fnName: string,
+): OptionChainRow[] {
+  if (scopeArg.kind !== 'call' || scopeArg.name !== 'scope') {
+    throw new Error(`${fnName}() expects a scope(<predicate>) argument.`);
+  }
+  const snap = requireSnapshot(ctx, fnName);
+  return filterByScope(scopeArg.args[0], snap, outerRow, ctx);
+}
+
+/** chain* aggregator helper. Body is evaluated once per iterated strike
+ *  with that strike as the primary row (plain fields = iterated). Non-finite
+ *  results are skipped (unified onMissing=skip policy). */
+function chainSeries(
+  args: Expr[], outerRow: OptionChainRow, ctx: EvalContext, fnName: string,
+): number[] {
+  const snap = scopeStrikes(args, 1, ctx, outerRow, fnName);
+  const values: number[] = [];
+  for (const iterRow of snap) {
+    try {
+      const v = evaluate(args[0], iterRow, ctx);
+      if (Number.isFinite(v)) values.push(v);
+    } catch { /* skip */ }
+  }
+  return values;
+}
+
+/** pivot* aggregator helper. Body is evaluated once per iterated strike with
+ *  the OUTER row as the primary row and `crossRow` set to the iterated
+ *  strike (so plain fields = outer, strike_* = iterated). Skip on NaN/error. */
+function pivotSeries(
+  args: Expr[], outerRow: OptionChainRow, ctx: EvalContext, fnName: string,
+): number[] {
+  const snap = scopeStrikes(args, 1, ctx, outerRow, fnName);
   const values: number[] = [];
   for (const crossRow of snap) {
-    const innerCtx: InternalContext = { ...(ctx as InternalContext), crossRow };
+    const inner: InternalContext = { ...(ctx as InternalContext), crossRow };
     try {
-      const v = evaluate(body, outerRow, innerCtx);
+      const v = evaluate(args[0], outerRow, inner);
       if (Number.isFinite(v)) values.push(v);
-    } catch { /* skip rows that error mid-fold */ }
+    } catch { /* skip */ }
   }
   return values;
 }
@@ -196,18 +266,28 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   all: (a, r, c) => a.every((x) => ev(x, r, c)) ? 1 : 0,
   count: (a, r, c) => a.reduce((n, x) => n + (ev(x, r, c) ? 1 : 0), 0),
 
+  // ── Cross-strike: scope (filters strikes for the enclosing function) ──
+  // `scope()` is never invoked through normal evaluate() — it's consumed by
+  // its enclosing function via `extractScopeStrikes`. Reaching this dispatch
+  // entry means a user typed `scope(...)` outside any scope-accepting slot.
+  scope: () => {
+    throw new Error(
+      'scope() can only be used as the trailing argument of a cross-strike function (e.g. chainSum(call_oi, scope(strike_call_oi > 50000))).',
+    );
+  },
+
   // ── Cross-strike: pick one ──
   atStrike: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
     const targetStrike = ev(a[1], r, c);
-    const snap = requireSnapshot(c, 'atStrike');
+    const snap = scopeStrikes(a, 2, c, r, 'atStrike');
     const found = snap.find((row) => row.strikePrice === targetStrike);
     return found ? readTargetAt(target, found, c) : NaN;
   },
   atOffset: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
     const offset = ev(a[1], r, c);
-    const snap = requireSnapshot(c, 'atOffset');
+    const snap = scopeStrikes(a, 2, c, r, 'atOffset');
     const idx = snap.findIndex((row) => row.strikePrice === r.strikePrice);
     if (idx < 0) return NaN;
     const targetRow = snap[idx + offset];
@@ -215,7 +295,7 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   },
   atm: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
-    const snap = requireSnapshot(c, 'atm');
+    const snap = scopeStrikes(a, 1, c, r, 'atm');
     if (snap.length === 0) return NaN;
     const spot = snap[0].underlyingValue;
     let best = snap[0];
@@ -227,18 +307,66 @@ const BUILTINS: Record<string, BuiltinImpl> = {
     return readTargetAt(target, best, c);
   },
 
-  // ── Cross-strike: aggregate over all ──
-  sumStrikes:    (a, r, c) => aggregate(crossSeries(a, r, c, 'sumStrikes'), 'sum'),
-  avgStrikes:    (a, r, c) => aggregate(crossSeries(a, r, c, 'avgStrikes'), 'avg'),
-  medianStrikes: (a, r, c) => aggregate(crossSeries(a, r, c, 'medianStrikes'), 'median'),
-  minStrikes:    (a, r, c) => aggregate(crossSeries(a, r, c, 'minStrikes'), 'min'),
-  maxStrikes:    (a, r, c) => aggregate(crossSeries(a, r, c, 'maxStrikes'), 'max'),
-  stddevStrikes: (a, r, c) => aggregate(crossSeries(a, r, c, 'stddevStrikes'), 'stddev'),
+  // ── Cross-strike: single-strike picker (strike-ref output) ──
+  firstStrike: (a, r, c) => {
+    const matches = scopePassingStrikes(a[0], r, c, 'firstStrike');
+    return matches.length === 0 ? NaN : matches[0].strikePrice;
+  },
+  lastStrike: (a, r, c) => {
+    const matches = scopePassingStrikes(a[0], r, c, 'lastStrike');
+    return matches.length === 0 ? NaN : matches[matches.length - 1].strikePrice;
+  },
+  onlyStrike: (a, r, c) => {
+    const matches = scopePassingStrikes(a[0], r, c, 'onlyStrike');
+    if (matches.length === 0) {
+      throw new Error('onlyStrike() expected exactly one strike to pass scope, found zero.');
+    }
+    if (matches.length > 1) {
+      throw new Error(`onlyStrike() expected exactly one strike to pass scope, found ${matches.length}. Use firstStrike() / lastStrike() instead, or narrow the scope.`);
+    }
+    return matches[0].strikePrice;
+  },
+  evalAt: (a, r, c) => {
+    // The strikeRef arg evaluates to a strike-price number; we look up that
+    // strike in the snapshot and evaluate the body expression with that
+    // row as the primary row. Field references inside the body bind to
+    // THAT strike. Mirrors chain* binding semantics.
+    const strikePrice = ev(a[1], r, c);
+    if (!Number.isFinite(strikePrice)) return NaN;
+    const snap = requireSnapshot(c, 'evalAt');
+    const target = snap.find((row) => row.strikePrice === strikePrice);
+    if (!target) return NaN;
+    return evaluate(a[0], target, c);
+  },
+
+  // ── Cross-strike: chain aggregators (value-producing) ──
+  // Inside the body, plain field names bind to the iterated strike (not the
+  // outer row). Implemented by passing the iterated row as `row` to the
+  // recursive evaluate() — same mechanism evalAt uses. NaN values are
+  // skipped (unified onMissing=skip policy).
+  chainSum:     (a, r, c) => aggregate(chainSeries(a, r, c, 'chainSum'),     'sum'),
+  chainAvg:     (a, r, c) => aggregate(chainSeries(a, r, c, 'chainAvg'),     'avg'),
+  chainMedian:  (a, r, c) => aggregate(chainSeries(a, r, c, 'chainMedian'),  'median'),
+  chainMin:     (a, r, c) => aggregate(chainSeries(a, r, c, 'chainMin'),     'min'),
+  chainMax:     (a, r, c) => aggregate(chainSeries(a, r, c, 'chainMax'),     'max'),
+  chainStddev:  (a, r, c) => aggregate(chainSeries(a, r, c, 'chainStddev'),  'stddev'),
+  chainProduct: (a, r, c) => aggregate(chainSeries(a, r, c, 'chainProduct'), 'product'),
+  chainCount: (a, r, c) => {
+    const snap = scopeStrikes(a, 1, c, r, 'chainCount');
+    let n = 0;
+    for (const iterRow of snap) {
+      try {
+        const v = evaluate(a[0], iterRow, c);
+        if (Number.isFinite(v) && v !== 0) n++;
+      } catch { /* skip */ }
+    }
+    return n;
+  },
 
   // ── Cross-strike: ranking ──
   rank: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
-    const snap = requireSnapshot(c, 'rank');
+    const snap = scopeStrikes(a, 1, c, r, 'rank');
     const here = readTargetAt(target, r, c);
     // Descending rank: #1 = highest.
     let pos = 1;
@@ -250,7 +378,7 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   },
   pctile: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
-    const snap = requireSnapshot(c, 'pctile');
+    const snap = scopeStrikes(a, 1, c, r, 'pctile');
     if (snap.length === 0) return NaN;
     const here = readTargetAt(target, r, c);
     let below = 0;
@@ -260,7 +388,7 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   topN: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
     const n = ev(a[1], r, c);
-    const snap = requireSnapshot(c, 'topN');
+    const snap = scopeStrikes(a, 2, c, r, 'topN');
     const sorted = [...snap].sort((x, y) => readTargetAt(target, y, c) - readTargetAt(target, x, c));
     const slice = sorted.slice(0, Math.max(0, Math.floor(n)));
     return slice.some((row) => row.strikePrice === r.strikePrice) ? 1 : 0;
@@ -268,26 +396,27 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   bottomN: (a, r, c) => {
     const target = readFieldOrColumnRef(a[0], r, c);
     const n = ev(a[1], r, c);
-    const snap = requireSnapshot(c, 'bottomN');
+    const snap = scopeStrikes(a, 2, c, r, 'bottomN');
     const sorted = [...snap].sort((x, y) => readTargetAt(target, x, c) - readTargetAt(target, y, c));
     const slice = sorted.slice(0, Math.max(0, Math.floor(n)));
     return slice.some((row) => row.strikePrice === r.strikePrice) ? 1 : 0;
   },
 
-  // ── Cross-strike: fold expression over all strikes ──
-  // These take an ARBITRARY expression (not just a fieldRef) and evaluate it
-  // once per strike with `cross_*` fields bound to that strike's data. The
-  // outer-row context still resolves plain field reads. Max-pain shape:
-  //   sumOverStrikes(abs(cross_strikePrice - strikePrice)
-  //     * (cross_strikePrice > strikePrice ? cross_put_oi : cross_call_oi))
-  sumOverStrikes:     (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'sumOverStrikes'), 'sum'),
-  avgOverStrikes:     (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'avgOverStrikes'), 'avg'),
-  productOverStrikes: (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'productOverStrikes'), 'product'),
-  maxOverStrikes:     (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'maxOverStrikes'), 'max'),
-  minOverStrikes:     (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'minOverStrikes'), 'min'),
-  medianOverStrikes:  (a, r, c) => aggregate(foldStrikes(a[0], r, c, 'medianOverStrikes'), 'median'),
-  countOverStrikes:   (a, r, c) => {
-    const snap = requireSnapshot(c, 'countOverStrikes');
+  // ── Cross-strike: pivot fold (per-row, uses outer-row + strike_*) ──
+  // For each rendered row, evaluate the body once per iterated strike with
+  // `strike_*` fields bound to the iterated strike's data. Plain field
+  // reads still bind to the OUTER row. Max-pain shape:
+  //   pivotSum(abs(strike_strikePrice - strikePrice)
+  //     * (strike_strikePrice > strikePrice ? strike_put_oi : strike_call_oi))
+  pivotSum:     (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotSum'),     'sum'),
+  pivotAvg:     (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotAvg'),     'avg'),
+  pivotMedian:  (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotMedian'),  'median'),
+  pivotMin:     (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotMin'),     'min'),
+  pivotMax:     (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotMax'),     'max'),
+  pivotProduct: (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotProduct'), 'product'),
+  pivotStddev:  (a, r, c) => aggregate(pivotSeries(a, r, c, 'pivotStddev'),  'stddev'),
+  pivotCount: (a, r, c) => {
+    const snap = scopeStrikes(a, 1, c, r, 'pivotCount');
     let n = 0;
     for (const crossRow of snap) {
       const innerCtx: InternalContext = { ...(c as InternalContext), crossRow };
@@ -336,13 +465,6 @@ const BUILTINS: Record<string, BuiltinImpl> = {
   historical:          NOT_YET('historical', 'Phase 3'),
 };
 
-/** Map every strike to its value of the target (raw field or saved column). */
-function crossSeries(args: Expr[], row: OptionChainRow, ctx: EvalContext, fnName: string): number[] {
-  const target = readFieldOrColumnRef(args[0], row, ctx);
-  const snap = requireSnapshot(ctx, fnName);
-  return snap.map((r) => readTargetAt(target, r, ctx));
-}
-
 // ─────── Public evaluator ───────
 
 export function evaluate(expr: Expr, row: OptionChainRow, ctx: EvalContext = EMPTY_CTX): number {
@@ -365,7 +487,7 @@ export function evaluate(expr: Expr, row: OptionChainRow, ctx: EvalContext = EMP
       const cross = (ctx as InternalContext).crossRow;
       if (!cross) {
         throw new Error(
-          `cross_${expr.name} can only be used inside a *OverStrikes(...) function (e.g. sumOverStrikes, avgOverStrikes).`,
+          `strike_${expr.name} can only be used inside a pivot*(...) function or a scope() predicate (e.g. pivotSum, pivotAvg).`,
         );
       }
       // Cross-field reads do NOT trace — the trace exists to drive cell
@@ -417,7 +539,7 @@ export function evaluate(expr: Expr, row: OptionChainRow, ctx: EvalContext = EMP
       const cross = (ctx as InternalContext).crossRow;
       if (!cross) {
         throw new Error(
-          `cross_${expr.name} can only be used inside a *OverStrikes(...) function.`,
+          `strike_${expr.name} can only be used inside a pivot*(...) function or a scope() predicate.`,
         );
       }
       // Cross-column reads do NOT trace — same reasoning as crossField.
@@ -434,7 +556,7 @@ export function evaluate(expr: Expr, row: OptionChainRow, ctx: EvalContext = EMP
     }
     case 'unresolvedIdent':
       throw new Error(
-        `Identifier "${expr.cross ? `cross_${expr.name}` : expr.name}" was never resolved. Did you forget to call resolveColumnRefs after parseExpressionLoose?`,
+        `Identifier "${expr.cross ? `strike_${expr.name}` : expr.name}" was never resolved. Did you forget to call resolveColumnRefs after parseExpressionLoose?`,
       );
     case 'duration':
       throw new Error(`Duration "${expr.literal}" cannot be used as a number.`);
@@ -502,10 +624,10 @@ export function formatExpr(expr: Expr, parentPrec = 0): string {
     case 'const': return expr.name;
     case 'field': return expr.name;
     case 'fieldLit': return expr.name;
-    case 'crossField': return `cross_${expr.name}`;
+    case 'crossField': return `strike_${expr.name}`;
     case 'columnRef': return expr.name;
-    case 'crossColumnRef': return `cross_${expr.name}`;
-    case 'unresolvedIdent': return expr.cross ? `cross_${expr.name}` : expr.name;
+    case 'crossColumnRef': return `strike_${expr.name}`;
+    case 'unresolvedIdent': return expr.cross ? `strike_${expr.name}` : expr.name;
     case 'duration': return expr.literal;
     case 'stringLit': return `'${expr.value}'`;
     case 'unary': return `${expr.op}${formatExpr(expr.arg, 7)}`;

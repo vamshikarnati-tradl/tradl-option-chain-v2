@@ -8,7 +8,8 @@ export type {
 export {
   parseExpression, parseExpressionLoose, resolveColumnRefs,
   extractDependencies, analyzeDependencies, returnsBoolean,
-  CROSS_FIELD_PREFIX,
+  returnsValue, referencesOuterRow,
+  STRIKE_FIELD_PREFIX, CROSS_FIELD_PREFIX,
 } from './expression-parser.js';
 
 export {

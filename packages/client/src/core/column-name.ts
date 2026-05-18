@@ -1,10 +1,10 @@
-// Validation + slugging for custom-column identifier names.
+// Validation + slugging for custom-column (and value) identifier names.
 //
 // A column's `name` doubles as its identifier inside expressions
 // (`maxPain > 100`). It must therefore be a syntactically-valid identifier
 // that doesn't collide with any reserved name in the parser's vocabulary:
-// fields, functions, constants, or the `cross_` / `col_` prefixes used for
-// other AST machinery.
+// fields, functions, constants, or the `strike_` / `cross_` (legacy alias)
+// / `col_` prefixes used for other AST machinery.
 
 import { NUMERIC_FIELDS, knownFunctionNames } from '@tradl/shared';
 
@@ -22,7 +22,7 @@ const RESERVED_LITERAL_WORDS = new Set([
   'tick', 's', 'm', 'h', 'd',  // duration unit shorthand
 ]);
 
-const FORBIDDEN_PREFIXES = ['cross_', 'col_'];
+const FORBIDDEN_PREFIXES = ['strike_', 'cross_', 'col_'];
 
 export function reservedNames(): Set<string> {
   return new Set<string>([

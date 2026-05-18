@@ -1,6 +1,6 @@
 // Shared parse helper for any UI surface that renders a stored expression —
 // rule cards, hover tooltips, AI preview, column cards. The stored
-// expression may contain column references (`maxPain`, `cross_maxPain`)
+// expression may contain column references (`maxPain`, `strike_maxPain`)
 // that the strict `parseExpression` rejects as unknown identifiers.
 //
 // This helper does loose parse → resolve in one call, preserving the

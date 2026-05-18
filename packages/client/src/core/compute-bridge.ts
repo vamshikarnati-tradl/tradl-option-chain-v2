@@ -4,6 +4,7 @@
 import type {
   ColumnResult, CustomColumnDefinition,
   OptionChainRow, RuleDefinition, RuleResult,
+  ValueDefinition, ValueResult,
 } from './types';
 
 export interface ComputeStats {
@@ -17,12 +18,14 @@ export interface ComputeStats {
 export interface ComputeOutput {
   ruleResults: RuleResult[];
   columnResults: ColumnResult[];
+  valueResults: ValueResult[];
   stats: ComputeStats;
 }
 
 export interface ConfigErrors {
   ruleErrors: { ruleId: string; error: string }[];
   columnErrors: { columnId: string; error: string }[];
+  valueErrors: { valueId: string; error: string }[];
   /** Column dependency cycles detected during topo-sort (column-name traces). */
   cycleErrors: string[];
 }
@@ -44,6 +47,7 @@ export class ComputeBridge {
       const out: ComputeOutput = {
         ruleResults: msg.ruleResults,
         columnResults: msg.columnResults,
+        valueResults: msg.valueResults ?? [],
         stats: {
           durationMs: msg.durationMs,
           reusedRules: msg.reusedRules,
@@ -57,6 +61,7 @@ export class ComputeBridge {
       for (const l of this.errorListeners) l({
         ruleErrors: msg.ruleErrors,
         columnErrors: msg.columnErrors,
+        valueErrors: msg.valueErrors ?? [],
         cycleErrors: msg.cycleErrors ?? [],
       });
     }
@@ -78,6 +83,10 @@ export class ComputeBridge {
 
   setColumns(columns: CustomColumnDefinition[]): void {
     this.worker.postMessage({ type: 'SET_COLUMNS', columns });
+  }
+
+  setValues(values: ValueDefinition[]): void {
+    this.worker.postMessage({ type: 'SET_VALUES', values });
   }
 
   updateData(rows: OptionChainRow[]): void {

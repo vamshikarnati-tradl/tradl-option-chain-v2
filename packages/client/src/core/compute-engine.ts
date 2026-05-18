@@ -14,9 +14,11 @@
 import type {
   ColumnCellResult, ColumnResult, CustomColumnDefinition,
   NumericField, OptionChainRow, RuleDefinition, RuleResult,
+  ValueDefinition, ValueResult,
 } from './types';
 import {
-  parseExpressionLoose, resolveColumnRefs, analyzeDependencies, evaluate,
+  parseExpressionLoose, resolveColumnRefs, analyzeDependencies,
+  referencesOuterRow, evaluate,
   type Expr, type EvalContext,
 } from '@tradl/shared';
 import { compileRule, evaluateCompiledRule, type CompiledRule } from './rule-engine';
@@ -36,9 +38,17 @@ interface CompiledColumn {
   cellCache: Map<number, ColumnCellResult>;
 }
 
+interface CompiledValue {
+  source: ValueDefinition;
+  ast: Expr;
+  fieldDeps: NumericField[];
+  columnRefs: string[];
+}
+
 export interface ComputeResult {
   ruleResults: RuleResult[];
   columnResults: ColumnResult[];
+  valueResults: ValueResult[];
   durationMs: number;
   reusedRules: number;
   reusedCells: number;
@@ -48,6 +58,7 @@ export interface ComputeResult {
 export interface CompileErrors {
   ruleErrors: { ruleId: string; error: string }[];
   columnErrors: { columnId: string; error: string }[];
+  valueErrors: { valueId: string; error: string }[];
   /** Cycles detected during column topological sort. Each entry is a
    *  human-readable column-name loop (e.g. `["maxPain → painProxy → maxPain"]`). */
   cycleErrors: string[];
@@ -56,6 +67,7 @@ export interface CompileErrors {
 export class ComputeEngine {
   private rules: CompiledRule[] = [];
   private columns: CompiledColumn[] = [];
+  private values: CompiledValue[] = [];
   /** Lookup table for compiled column ASTs by id — supplied to the
    *  evaluator so `evaluateWithTrace` can recurse into column bodies. */
   private columnAstsById = new Map<string, Expr>();
@@ -115,6 +127,33 @@ export class ComputeEngine {
     this.columns = compiled;
     this.columnAstsById = asts;
     return { errors, cycleErrors };
+  }
+
+  setValues(defs: ValueDefinition[]): { errors: { valueId: string; error: string }[] } {
+    const errors: { valueId: string; error: string }[] = [];
+    const compiled: CompiledValue[] = [];
+    const columnsByName = new Map(this.columnDefs.map((c) => [c.name, c]));
+    for (const def of defs) {
+      try {
+        const loose = parseExpressionLoose(def.expression);
+        const ast = resolveColumnRefs(loose, columnsByName);
+        // Reject value expressions that read the outer row anywhere —
+        // they'd vary per-row and don't belong in the chain-scalar slot.
+        if (referencesOuterRow(ast)) {
+          throw new Error(
+            `Value "${def.name}" must not reference outer-row fields (this would make it per-row, not a chain-wide value). Use chain*/firstStrike/evalAt etc. to keep it scalar.`,
+          );
+        }
+        const deps = analyzeDependencies(ast);
+        compiled.push({
+          source: def, ast, fieldDeps: deps.fields, columnRefs: deps.columnRefs,
+        });
+      } catch (err) {
+        errors.push({ valueId: def.id, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this.values = compiled;
+    return { errors };
   }
 
   computeAll(rows: OptionChainRow[]): ComputeResult {
@@ -222,6 +261,39 @@ export class ComputeEngine {
       return fresh;
     });
 
+    // ─── Value pass: chain-wide scalars, computed once per tick ───
+    // Values have no outer-row deps by construction (enforced in
+    // setValues), so we evaluate with the first row as a structurally
+    // valid but semantically unused "primary row" for the evaluator
+    // signature. The expression never touches it.
+    // When the chain is empty (no rows), short-circuit: every value
+    // resolves to null. Reaching evaluate() with no primary row would
+    // crash; aggregators over an empty snapshot would return NaN
+    // anyway, so the user-visible result is the same.
+    const valueResults: ValueResult[] = rows.length === 0
+      ? this.values.map((val) => ({ valueId: val.source.id, value: null, error: 'empty chain' }))
+      : (() => {
+          const valueCtx: EvalContext = {
+            snapshot: rows,
+            columnValues,
+            compiledColumns: this.columnAstsById,
+          };
+          return this.values.map((val) => {
+            try {
+              const v = evaluate(val.ast, rows[0], valueCtx);
+              if (!Number.isFinite(v)) {
+                return { valueId: val.source.id, value: null, error: 'non-finite' };
+              }
+              return { valueId: val.source.id, value: v };
+            } catch (err) {
+              return {
+                valueId: val.source.id, value: null,
+                error: err instanceof Error ? err.message : String(err),
+              };
+            }
+          });
+        })();
+
     // Persist current rows as the new "previous" baseline.
     this.prevRows.clear();
     for (const row of rows) this.prevRows.set(row.strikePrice, row);
@@ -229,6 +301,7 @@ export class ComputeEngine {
     return {
       ruleResults,
       columnResults,
+      valueResults,
       durationMs: performance.now() - t0,
       reusedRules,
       reusedCells,

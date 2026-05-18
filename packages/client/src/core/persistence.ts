@@ -1,10 +1,14 @@
-import type { CustomColumnDefinition, RuleDefinition, RuleSlider } from './types';
-import { PREDEFINED_COLUMNS, PREDEFINED_RULES } from './predefined';
+import type {
+  CustomColumnDefinition, RuleDefinition, RuleSlider, ValueDefinition,
+} from './types';
+import { PREDEFINED_COLUMNS, PREDEFINED_RULES, PREDEFINED_VALUES } from './predefined';
 import { hueFromHex, PALETTE_HUES } from './palette';
 import { STORAGE_KEYS } from './storage-keys';
+import { migrateExpression, reflowOffset } from './expression-rewrite';
 
 const RULES_KEY = STORAGE_KEYS.rules;
 const COLUMNS_KEY = STORAGE_KEYS.columns;
+const VALUES_KEY = STORAGE_KEYS.values;
 
 const PREDEFINED_BY_ID = new Map(PREDEFINED_RULES.map((r) => [r.id, r]));
 
@@ -142,14 +146,25 @@ function migrateRule(raw: LegacyRule, idx: number): RuleDefinition | null {
     if (predefined) {
       return { ...predefined, enabled: raw.enabled !== false };
     }
+    // Apply chain*/pivot*/strike_* language migration. If the slider's
+    // literalOffset is set, reflow it through the rewrite offset table so
+    // it still points at the same literal in the rewritten source.
+    const rw = migrateExpression(raw.expression);
+    let slider: RuleSlider | undefined;
+    if (isFullSlider(raw.slider)) {
+      slider = {
+        ...raw.slider,
+        literalOffset: reflowOffset(raw.slider.literalOffset, rw.offsets),
+      };
+    }
     return {
       id: raw.id ?? `rule_${Date.now().toString(36)}_${idx}`,
       name: raw.name ?? 'Unnamed',
       description: raw.description,
       enabled: raw.enabled !== false,
-      expression: raw.expression,
+      expression: rw.source,
       hue: typeof raw.hue === 'number' ? raw.hue : resolveHue(raw, idx),
-      slider: isFullSlider(raw.slider) ? raw.slider : undefined,
+      slider,
     };
   }
 
@@ -263,7 +278,8 @@ function migrateColumnsToV2(raw: unknown[]): MigratedColumns {
       name: nextName,
       displayLabel,
       description: e.description,
-      expression: e.expression,
+      // Migrate cross_* / *Strikes / *OverStrikes in the saved expression.
+      expression: migrateExpression(e.expression).source,
       format: e.format ?? { type: 'number', decimals: 2 },
       side: e.side ?? 'general',
     });
@@ -359,7 +375,68 @@ export function saveColumns(columns: CustomColumnDefinition[]): void {
   }
 }
 
+// ─────── Values ───────
+//
+// Values are chain-wide scalars. Same envelope shape as columns but no name
+// validation pass (predefined values seed canonical identifiers; user-added
+// values flow through the same name-validator at write time).
+
+interface ValuesEnvelopeV1 {
+  version: 1;
+  values: ValueDefinition[];
+}
+
+function isValuesEnvelope(x: unknown): x is ValuesEnvelopeV1 {
+  return !!x && typeof x === 'object'
+    && (x as { version?: unknown }).version === 1
+    && Array.isArray((x as { values?: unknown }).values);
+}
+
+function migrateValue(raw: Partial<ValueDefinition>): ValueDefinition | null {
+  if (typeof raw.id !== 'string' || typeof raw.name !== 'string' || typeof raw.expression !== 'string') {
+    return null;
+  }
+  return {
+    id: raw.id,
+    name: raw.name,
+    displayLabel: raw.displayLabel,
+    description: raw.description,
+    expression: migrateExpression(raw.expression).source,
+    format: raw.format ?? { type: 'number', decimals: 2 },
+  };
+}
+
+export function loadValues(): ValueDefinition[] {
+  try {
+    const raw = localStorage.getItem(VALUES_KEY);
+    if (!raw) return PREDEFINED_VALUES;
+    const parsed = JSON.parse(raw);
+    let rawValues: unknown[] | null = null;
+    if (isValuesEnvelope(parsed)) rawValues = parsed.values;
+    else if (Array.isArray(parsed)) rawValues = parsed;
+    if (!rawValues) return PREDEFINED_VALUES;
+    const migrated: ValueDefinition[] = [];
+    for (const entry of rawValues) {
+      const m = migrateValue(entry as Partial<ValueDefinition>);
+      if (m) migrated.push(m);
+    }
+    return migrated.length > 0 ? migrated : PREDEFINED_VALUES;
+  } catch {
+    return PREDEFINED_VALUES;
+  }
+}
+
+export function saveValues(values: ValueDefinition[]): void {
+  try {
+    const envelope: ValuesEnvelopeV1 = { version: 1, values };
+    localStorage.setItem(VALUES_KEY, JSON.stringify(envelope));
+  } catch {
+    // ignore
+  }
+}
+
 export function resetAll(): void {
   localStorage.removeItem(RULES_KEY);
   localStorage.removeItem(COLUMNS_KEY);
+  localStorage.removeItem(VALUES_KEY);
 }

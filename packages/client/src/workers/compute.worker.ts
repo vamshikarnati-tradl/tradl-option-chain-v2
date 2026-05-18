@@ -1,19 +1,21 @@
 /// <reference lib="webworker" />
 import { ComputeEngine } from '../core/compute-engine';
 import type {
-  OptionChainRow, RuleDefinition, CustomColumnDefinition,
+  OptionChainRow, RuleDefinition, CustomColumnDefinition, ValueDefinition,
 } from '../core/types';
 
 type In =
   | { type: 'UPDATE_DATA'; rows: OptionChainRow[] }
   | { type: 'SET_RULES'; rules: RuleDefinition[] }
-  | { type: 'SET_COLUMNS'; columns: CustomColumnDefinition[] };
+  | { type: 'SET_COLUMNS'; columns: CustomColumnDefinition[] }
+  | { type: 'SET_VALUES'; values: ValueDefinition[] };
 
 type Out =
   | {
       type: 'COMPUTE_RESULTS';
       ruleResults: ReturnType<ComputeEngine['computeAll']>['ruleResults'];
       columnResults: ReturnType<ComputeEngine['computeAll']>['columnResults'];
+      valueResults: ReturnType<ComputeEngine['computeAll']>['valueResults'];
       durationMs: number;
       reusedRules: number;
       reusedCells: number;
@@ -24,6 +26,7 @@ type Out =
       type: 'CONFIG_ERRORS';
       ruleErrors: { ruleId: string; error: string }[];
       columnErrors: { columnId: string; error: string }[];
+      valueErrors: { valueId: string; error: string }[];
       /** Cycle traces from column topo-sort (e.g. `"maxPain → painProxy → maxPain"`). */
       cycleErrors: string[];
     };
@@ -42,6 +45,7 @@ function compute(): void {
     type: 'COMPUTE_RESULTS',
     ruleResults: r.ruleResults,
     columnResults: r.columnResults,
+    valueResults: r.valueResults,
     durationMs: r.durationMs,
     reusedRules: r.reusedRules,
     reusedCells: r.reusedCells,
@@ -59,13 +63,19 @@ self.onmessage = (e: MessageEvent<In>) => {
       break;
     case 'SET_RULES': {
       const { errors } = engine.setRules(msg.rules);
-      postOut({ type: 'CONFIG_ERRORS', ruleErrors: errors, columnErrors: [], cycleErrors: [] });
+      postOut({ type: 'CONFIG_ERRORS', ruleErrors: errors, columnErrors: [], valueErrors: [], cycleErrors: [] });
       compute();
       break;
     }
     case 'SET_COLUMNS': {
       const { errors, cycleErrors } = engine.setColumns(msg.columns);
-      postOut({ type: 'CONFIG_ERRORS', ruleErrors: [], columnErrors: errors, cycleErrors });
+      postOut({ type: 'CONFIG_ERRORS', ruleErrors: [], columnErrors: errors, valueErrors: [], cycleErrors });
+      compute();
+      break;
+    }
+    case 'SET_VALUES': {
+      const { errors } = engine.setValues(msg.values);
+      postOut({ type: 'CONFIG_ERRORS', ruleErrors: [], columnErrors: [], valueErrors: errors, cycleErrors: [] });
       compute();
       break;
     }

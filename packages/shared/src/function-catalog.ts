@@ -20,14 +20,19 @@ export type Category =
 
 export type Status = 'live' | 'phase1' | 'phase2' | 'phase3';
 
-export type ReturnKind = 'number' | 'boolean' | 'integer' | 'percent' | 'rate';
+export type ReturnKind =
+  | 'number' | 'boolean' | 'integer' | 'percent' | 'rate'
+  | 'strikeList'   // scope() returns this — a set of strikes for crossStrike fns to iterate over
+  | 'strikeRef';   // firstStrike/lastStrike/onlyStrike return this — a single strike price
 
 export type ArgKind =
   | 'expression'      // any sub-expression returning a number/boolean
   | 'fieldRef'        // a raw field name — NOT evaluated against current row
   | 'duration'        // a window literal like 5s, 1m, 1d
   | 'integer'         // a constant integer literal
-  | 'historicalAgg';  // one of HISTORICAL_AGGS
+  | 'historicalAgg'   // one of HISTORICAL_AGGS
+  | 'scope'           // a scope(...) call producing a strike list
+  | 'strikeRef';      // a strike reference (output of firstStrike/lastStrike/onlyStrike)
 
 export interface ArgSpec {
   name: string;
@@ -57,6 +62,10 @@ export interface FunctionSpec {
   isTimeAware: boolean;
   /** True if evaluation requires the backend history service. */
   isHistorical: boolean;
+  /** True if the function accepts an optional trailing scope() argument that
+   *  narrows the strikes it iterates over. Default: false. The 16 crossStrike
+   *  functions all opt in. */
+  acceptsScope?: boolean;
 }
 
 // ───── Duration literal vocabulary ─────
@@ -345,13 +354,25 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     status: 'live', isSnapshotAware: false, isTimeAware: false, isHistorical: false,
   }),
 
+  // ───────── Cross-strike: scope (filter strikes) ─────────
+  F({
+    technicalName: 'scope', friendlyName: 'Scope (filter strikes)',
+    category: 'crossStrike', subgroup: 'Scope',
+    kidDescription: 'Pick which strikes count. The condition is checked for every strike; the function passing scope only sees the ones where it is true.',
+    args: [{ name: 'predicate', kind: 'expression', description: 'A boolean condition checked per strike. Use strike_* to read the strike being checked.' }],
+    returns: 'strikeList',
+    example: 'chainSum(call_oi, scope(abs(strike_strikePrice - underlyingValue) <= 250))',
+    exampleMeaning: 'Total call OI for strikes within 250 of spot (a window roughly ATM ±5 on a 50-wide chain).',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+
   // ───────── Cross-strike: pick one ─────────
   F({
     technicalName: 'atStrike', friendlyName: 'Value at Strike',
     category: 'crossStrike', subgroup: 'Pick one',
     kidDescription: 'Look up a value at a specific strike price.',
     args: [ARG_FIELD, ARG_NUMBER('strike')],
-    returns: 'number',
+    returns: 'number', acceptsScope: true,
     example: 'atStrike(call_oi, 24000)', exampleMeaning: 'Call OI at the 24000 strike.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -360,7 +381,7 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     category: 'crossStrike', subgroup: 'Pick one',
     kidDescription: 'Look up a value at the strike N rows above (or below if negative) this one.',
     args: [ARG_FIELD, ARG_INT('offset')],
-    returns: 'number',
+    returns: 'number', acceptsScope: true,
     example: 'atOffset(call_oi, 1)', exampleMeaning: 'Call OI at the next strike up.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -369,58 +390,132 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     category: 'crossStrike', subgroup: 'Pick one',
     kidDescription: 'The value at the at-the-money strike (closest to current spot).',
     args: [ARG_FIELD],
-    returns: 'number',
+    returns: 'number', acceptsScope: true,
     example: 'atm(call_iv)', exampleMeaning: 'IV of the call closest to spot.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
 
-  // ───────── Cross-strike: aggregate over all ─────────
+  // ───────── Cross-strike: single-strike picker (produces a strikeRef) ─────────
   F({
-    technicalName: 'sumStrikes', friendlyName: 'Sum Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: "Add this field's value from every strike together.",
-    args: [ARG_FIELD], returns: 'number',
-    example: 'sumStrikes(call_oi)', exampleMeaning: 'Total call OI across the whole chain.',
+    technicalName: 'firstStrike', friendlyName: 'First Strike in Scope',
+    category: 'crossStrike', subgroup: 'Single strike',
+    kidDescription: 'The strike price of the FIRST strike that passes the scope. NaN if none match.',
+    args: [{ name: 'scope', kind: 'scope' }],
+    returns: 'strikeRef',
+    example: 'firstStrike(scope(strike_call_oi == chainMax(call_oi)))',
+    exampleMeaning: 'Strike price of the highest call-OI strike (lowest-index match if tied).',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'avgStrikes', friendlyName: 'Average Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: 'Average this field across every strike.',
-    args: [ARG_FIELD], returns: 'number',
-    example: 'avgStrikes(call_iv)', exampleMeaning: 'Mean IV across all strikes.',
+    technicalName: 'lastStrike', friendlyName: 'Last Strike in Scope',
+    category: 'crossStrike', subgroup: 'Single strike',
+    kidDescription: 'The strike price of the LAST strike that passes the scope. NaN if none match.',
+    args: [{ name: 'scope', kind: 'scope' }],
+    returns: 'strikeRef',
+    example: 'lastStrike(scope(strike_call_oi == chainMax(call_oi)))',
+    exampleMeaning: 'Strike price of the highest call-OI strike (highest-index match if tied).',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'medianStrikes', friendlyName: 'Median Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: 'Median value across all strikes.',
-    args: [ARG_FIELD], returns: 'number',
-    example: 'medianStrikes(call_iv)', exampleMeaning: 'Median IV across the chain.',
+    technicalName: 'onlyStrike', friendlyName: 'Only Strike in Scope',
+    category: 'crossStrike', subgroup: 'Single strike',
+    kidDescription: 'The strike price of the single strike in scope. Errors if zero or more than one match.',
+    args: [{ name: 'scope', kind: 'scope' }],
+    returns: 'strikeRef',
+    example: 'onlyStrike(scope(strike_call_oi == chainMax(call_oi)))',
+    exampleMeaning: 'Strike price of the strike with the highest call OI; errors if more than one strike ties for the max.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'minStrikes', friendlyName: 'Min Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: 'Smallest value of this field across all strikes.',
-    args: [ARG_FIELD], returns: 'number',
-    example: 'minStrikes(call_iv)', exampleMeaning: 'Lowest call IV anywhere on the chain.',
+    technicalName: 'evalAt', friendlyName: 'Evaluate at Strike',
+    category: 'crossStrike', subgroup: 'Single strike',
+    kidDescription: 'Evaluate an expression at a single chosen strike. Plain fields inside the expression refer to THAT strike.',
+    args: [
+      { name: 'expression', kind: 'expression', description: 'The expression to evaluate at the chosen strike.' },
+      { name: 'strikeRef', kind: 'strikeRef', description: 'A strike reference (e.g., firstStrike(scope(...))).' },
+    ],
+    returns: 'number',
+    example: 'evalAt(call_oi + put_oi, firstStrike(scope(strike_call_oi == chainMax(call_oi))))',
+    exampleMeaning: 'Total OI at the highest call-OI strike.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+
+  // ───────── Cross-strike: chain aggregators (value-producing) ─────────
+  // Plain field names inside the body bind to the ITERATED strike (not the
+  // outer row). These produce a single value per chain, suitable for the
+  // value artifact type. Optional scope() narrows the iteration.
+  F({
+    technicalName: 'chainSum', friendlyName: 'Sum Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Add the value of this expression for every strike. Plain field names refer to the strike being iterated.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainSum(call_oi)', exampleMeaning: 'Total call OI across the whole chain.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'maxStrikes', friendlyName: 'Max Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: 'Biggest value of this field across all strikes.',
-    args: [ARG_FIELD], returns: 'number',
-    example: 'maxStrikes(call_oi)', exampleMeaning: 'Highest call OI strike.',
+    technicalName: 'chainAvg', friendlyName: 'Average Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Average this expression across every strike. Plain field names refer to the strike being iterated.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainAvg(call_iv)', exampleMeaning: 'Mean IV across all strikes.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'stddevStrikes', friendlyName: 'Spread Across Strikes',
-    category: 'crossStrike', subgroup: 'Aggregate over all',
-    kidDescription: 'How spread out this field is across strikes.',
-    args: [ARG_FIELD], returns: 'number',
-    example: 'stddevStrikes(call_iv)', exampleMeaning: 'How varied IVs are across strikes.',
+    technicalName: 'chainMedian', friendlyName: 'Median Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Median of this expression across every strike.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainMedian(call_iv)', exampleMeaning: 'Median IV across the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'chainMin', friendlyName: 'Min Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Smallest value of this expression across all strikes.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainMin(call_iv)', exampleMeaning: 'Lowest call IV anywhere on the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'chainMax', friendlyName: 'Max Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Biggest value of this expression across all strikes.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainMax(call_oi)', exampleMeaning: 'Largest call OI on the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'chainStddev', friendlyName: 'Spread Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'How spread out this expression is across strikes (population standard deviation).',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainStddev(call_iv)', exampleMeaning: 'How varied IVs are across strikes.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'chainProduct', friendlyName: 'Product Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'Multiply this expression across every strike. Useful for compound ratios.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'chainProduct(call_iv / 100 + 1)',
+    exampleMeaning: 'Compound IV factor across the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'chainCount', friendlyName: 'Count Across Chain',
+    category: 'crossStrike', subgroup: 'Chain aggregator',
+    kidDescription: 'How many strikes make this true/false expression true?',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'integer', acceptsScope: true,
+    example: 'chainCount(call_oi > 50000)',
+    exampleMeaning: 'How many strikes have call OI above 50k.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
 
@@ -429,7 +524,7 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     technicalName: 'rank', friendlyName: 'Rank',
     category: 'crossStrike', subgroup: 'Ranking',
     kidDescription: 'What position is this strike in if you sort by this field? #1, #2, …',
-    args: [ARG_FIELD], returns: 'integer',
+    args: [ARG_FIELD], returns: 'integer', acceptsScope: true,
     example: 'rank(call_oi)', exampleMeaning: 'Position of this strike by call OI.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -437,7 +532,7 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     technicalName: 'pctile', friendlyName: 'Percentile Rank',
     category: 'crossStrike', subgroup: 'Ranking',
     kidDescription: 'Percentile rank. Is this in the top 10%, top 50%?',
-    args: [ARG_FIELD], returns: 'percent',
+    args: [ARG_FIELD], returns: 'percent', acceptsScope: true,
     example: 'pctile(call_oi)', exampleMeaning: 'How high call OI is here vs other strikes.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -445,7 +540,7 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     technicalName: 'topN', friendlyName: 'In Top N?',
     category: 'crossStrike', subgroup: 'Ranking',
     kidDescription: 'Is this strike in the top N for this field? Yes/no.',
-    args: [ARG_FIELD, ARG_INT('n')], returns: 'boolean',
+    args: [ARG_FIELD, ARG_INT('n')], returns: 'boolean', acceptsScope: true,
     example: 'topN(call_oi, 3)', exampleMeaning: 'Is this one of the top 3 by call OI?',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -453,84 +548,93 @@ export const FUNCTION_CATALOG: readonly FunctionSpec[] = [
     technicalName: 'bottomN', friendlyName: 'In Bottom N?',
     category: 'crossStrike', subgroup: 'Ranking',
     kidDescription: 'Is this strike in the bottom N? Yes/no.',
-    args: [ARG_FIELD, ARG_INT('n')], returns: 'boolean',
+    args: [ARG_FIELD, ARG_INT('n')], returns: 'boolean', acceptsScope: true,
     example: 'bottomN(call_volume, 3)', exampleMeaning: 'Is this one of the 3 quietest calls?',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
 
-  // ───────── Cross-strike: fold expression over all strikes ─────────
-  // These take an EXPRESSION (not just a field name) and evaluate it once
-  // per strike with `cross_*` fields bound to that strike's data. Plain
-  // field reads inside the expression refer to the OUTER row (the row we're
-  // computing the value for). Lets users build max-pain, OI-weighted IV,
-  // open-interest concentration, etc.
+  // ───────── Cross-strike: pivot fold (per-row, uses outer-row context) ─────────
+  // These iterate strikes from the perspective of each rendered row. Inside
+  // the body: plain field names = OUTER row (the row being rendered);
+  // `strike_*` fields/columns = the iterated strike. Use these to build
+  // per-row max-pain, distance-weighted aggregations, etc.
   F({
-    technicalName: 'sumOverStrikes', friendlyName: 'Sum Expression Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'For every strike, work out this number and add them all together. Use cross_* fields to read the strike being looped over.',
+    technicalName: 'pivotSum', friendlyName: 'Pivot Sum',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'For each rendered row, sum this expression across strikes. Use strike_* for the iterated strike and plain names for this row.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'sumOverStrikes(abs(cross_strikePrice - strikePrice) * (cross_strikePrice > strikePrice ? cross_put_oi : cross_call_oi))',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotSum(abs(strike_strikePrice - strikePrice) * (strike_strikePrice > strikePrice ? strike_put_oi : strike_call_oi))',
     exampleMeaning: 'Max pain: total OI-weighted distance from each strike.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'avgOverStrikes', friendlyName: 'Average Expression Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'Average this expression across every strike. Cross_* refers to the strike being looped over.',
+    technicalName: 'pivotAvg', friendlyName: 'Pivot Average',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'For each rendered row, average this expression across strikes.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'avgOverStrikes(cross_call_iv * cross_call_oi) / avgStrikes(call_oi)',
-    exampleMeaning: 'Open-interest-weighted average call IV across the chain.',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotAvg(strike_call_iv * strike_call_oi) / chainSum(call_oi)',
+    exampleMeaning: 'Open-interest-weighted average call IV.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'productOverStrikes', friendlyName: 'Product Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'Multiply this expression across every strike. Mostly useful for compound ratios.',
+    technicalName: 'pivotMedian', friendlyName: 'Pivot Median',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'Median of this expression across strikes, per rendered row.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'productOverStrikes(cross_call_iv / 100 + 1)',
-    exampleMeaning: 'Compound IV factor across the chain.',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotMedian(strike_call_iv)',
+    exampleMeaning: 'Median call IV across the chain.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'maxOverStrikes', friendlyName: 'Max Expression Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'For every strike, work out this number and take the biggest.',
+    technicalName: 'pivotMin', friendlyName: 'Pivot Min',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'For each rendered row, take the smallest value of this expression.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'maxOverStrikes(cross_call_oi + cross_put_oi)',
-    exampleMeaning: 'Highest total OI seen anywhere on the chain.',
-    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
-  }),
-  F({
-    technicalName: 'minOverStrikes', friendlyName: 'Min Expression Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'For every strike, work out this number and take the smallest.',
-    args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'minOverStrikes(abs(cross_call_iv - cross_put_iv))',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotMin(abs(strike_call_iv - strike_put_iv))',
     exampleMeaning: 'Smallest call/put IV gap on the chain.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'medianOverStrikes', friendlyName: 'Median Expression Over Strikes',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'Median of this expression across every strike.',
+    technicalName: 'pivotMax', friendlyName: 'Pivot Max',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'For each rendered row, take the biggest value of this expression.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'number',
-    example: 'medianOverStrikes(cross_call_iv)',
-    exampleMeaning: 'Median call IV across all strikes.',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotMax(strike_call_oi + strike_put_oi)',
+    exampleMeaning: 'Highest total OI seen anywhere on the chain.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
   F({
-    technicalName: 'countOverStrikes', friendlyName: 'Count Where',
-    category: 'crossStrike', subgroup: 'Fold expression',
-    kidDescription: 'How many strikes make this true/false expression true?',
+    technicalName: 'pivotProduct', friendlyName: 'Pivot Product',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'Multiply this expression across every strike, per rendered row.',
     args: [{ name: 'expression', kind: 'expression' }],
-    returns: 'integer',
-    example: 'countOverStrikes(cross_call_oi > 50000)',
+    returns: 'number', acceptsScope: true,
+    example: 'pivotProduct(strike_call_iv / 100 + 1)',
+    exampleMeaning: 'Compound IV factor across the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'pivotStddev', friendlyName: 'Pivot Spread',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'How spread out this expression is, per rendered row.',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'number', acceptsScope: true,
+    example: 'pivotStddev(strike_call_iv)',
+    exampleMeaning: 'Spread of call IV across the chain.',
+    status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
+  }),
+  F({
+    technicalName: 'pivotCount', friendlyName: 'Pivot Count Where',
+    category: 'crossStrike', subgroup: 'Pivot aggregator',
+    kidDescription: 'How many strikes make this true/false expression true, per rendered row?',
+    args: [{ name: 'expression', kind: 'expression' }],
+    returns: 'integer', acceptsScope: true,
+    example: 'pivotCount(strike_call_oi > 50000)',
     exampleMeaning: 'How many strikes have call OI above 50k.',
     status: 'live', isSnapshotAware: true, isTimeAware: false, isHistorical: false,
   }),
@@ -833,10 +937,12 @@ export function knownFunctionNames(): readonly string[] {
   return FUNCTION_CATALOG.map((f) => f.technicalName);
 }
 
-/** Arity bounds for a function (parser uses this to validate arg count). */
+/** Arity bounds for a function (parser uses this to validate arg count).
+ *  `acceptsScope: true` widens the max by 1 (the optional trailing scope arg). */
 export function arityOf(spec: FunctionSpec): [number, number] {
   const fixed = spec.args.length;
-  if (!spec.rest) return [fixed, fixed];
+  const scopeSlot = spec.acceptsScope ? 1 : 0;
+  if (!spec.rest) return [fixed, fixed + scopeSlot];
   return [fixed + spec.rest.minCount, Infinity];
 }
 
@@ -971,12 +1077,16 @@ export const SUBGROUP_CATALOG: readonly SubgroupSpec[] = [
     description: 'Pick a value based on a condition: ifelse, ternary.' },
   { category: 'logic', name: 'Count',
     description: 'Count or quantify booleans: any, all, count.' },
+  { category: 'crossStrike', name: 'Scope',
+    description: 'Filter which strikes a cross-strike function operates on: scope(<predicate>). Used as an optional trailing argument.' },
   { category: 'crossStrike', name: 'Pick one',
     description: 'Read one value from another strike in the snapshot: atStrike, atOffset, atm.' },
-  { category: 'crossStrike', name: 'Aggregate over all',
-    description: 'Aggregate a field across every strike: sumStrikes, avgStrikes, medianStrikes, minStrikes, maxStrikes, stddevStrikes.' },
-  { category: 'crossStrike', name: 'Fold expression',
-    description: 'Aggregate an expression evaluated per other strike using `cross_*` references: sumOverStrikes, avgOverStrikes, etc.' },
+  { category: 'crossStrike', name: 'Single strike',
+    description: 'Pick a single strike from a scope (firstStrike/lastStrike/onlyStrike) and evaluate an expression at it via evalAt.' },
+  { category: 'crossStrike', name: 'Chain aggregator',
+    description: 'Collapse an expression to ONE number across strikes (no outer-row reads — suitable for the value artifact type): chainSum, chainAvg, chainMedian, chainMin, chainMax, chainStddev, chainProduct, chainCount.' },
+  { category: 'crossStrike', name: 'Pivot aggregator',
+    description: 'For each rendered row, aggregate an expression across strikes using `strike_*` references (column-producing): pivotSum, pivotAvg, pivotMedian, pivotMin, pivotMax, pivotStddev, pivotProduct, pivotCount.' },
   { category: 'crossStrike', name: 'Ranking',
     description: 'Rank or filter strikes by a field: rank, pctile, topN, bottomN.' },
   { category: 'recentHistory', name: 'Point in past',

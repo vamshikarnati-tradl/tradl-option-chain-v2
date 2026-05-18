@@ -68,7 +68,7 @@ function Node({ node, ...rest }: NodeProps): JSX.Element {
 }
 
 function ColumnPill({ name, cross }: { name: string; cross?: boolean }) {
-  const display = cross ? `cross·${name}` : name;
+  const display = cross ? `strike·${name}` : name;
   const title = cross
     ? `${name} — column value at the strike being iterated over`
     : `${name} — your saved column`;
@@ -85,7 +85,7 @@ function ColumnPill({ name, cross }: { name: string; cross?: boolean }) {
 function UnresolvedPill({ name, cross }: { name: string; cross: boolean }) {
   return (
     <span className="expr-unresolved" title="Unknown identifier — typo or a deleted column">
-      {cross ? `cross_${name}` : name}
+      {cross ? `strike_${name}` : name}
     </span>
   );
 }
@@ -96,7 +96,7 @@ function VarPill({ name, muted, cross }: { name: string; muted?: boolean; cross?
   const field = FIELD_CATALOG.find((f) => f.technicalName === name);
   const group = field?.group ?? 'market';
   const cls = `expr-var expr-var-${group}${muted ? ' expr-var-muted' : ''}${cross ? ' expr-var-cross' : ''}`;
-  const display = cross ? `cross·${name}` : name;
+  const display = cross ? `strike·${name}` : name;
   const title = cross
     ? `${field?.description ?? name} — value from the strike being iterated over`
     : field?.description ?? name;
@@ -353,12 +353,27 @@ function labelFor(name: string): string {
     atStrike: 'AT STRIKE',
     atOffset: 'AT OFFSET',
     atm: 'AT THE MONEY',
-    sumStrikes: 'SUM ACROSS STRIKES',
-    avgStrikes: 'AVERAGE ACROSS STRIKES',
-    medianStrikes: 'MEDIAN ACROSS STRIKES',
-    minStrikes: 'MIN ACROSS STRIKES',
-    maxStrikes: 'MAX ACROSS STRIKES',
-    stddevStrikes: 'SPREAD ACROSS STRIKES',
+    scope: 'SCOPE',
+    firstStrike: 'FIRST STRIKE',
+    lastStrike: 'LAST STRIKE',
+    onlyStrike: 'ONLY STRIKE',
+    evalAt: 'EVAL AT',
+    chainSum: 'SUM ACROSS CHAIN',
+    chainAvg: 'AVERAGE ACROSS CHAIN',
+    chainMedian: 'MEDIAN ACROSS CHAIN',
+    chainMin: 'MIN ACROSS CHAIN',
+    chainMax: 'MAX ACROSS CHAIN',
+    chainStddev: 'SPREAD ACROSS CHAIN',
+    chainProduct: 'PRODUCT ACROSS CHAIN',
+    chainCount: 'COUNT ACROSS CHAIN',
+    pivotSum: 'PIVOT SUM',
+    pivotAvg: 'PIVOT AVERAGE',
+    pivotMedian: 'PIVOT MEDIAN',
+    pivotMin: 'PIVOT MIN',
+    pivotMax: 'PIVOT MAX',
+    pivotStddev: 'PIVOT SPREAD',
+    pivotProduct: 'PIVOT PRODUCT',
+    pivotCount: 'PIVOT COUNT WHERE',
     rank: 'RANK OF',
     pctile: 'PERCENTILE OF',
     topN: 'TOP OF',

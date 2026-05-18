@@ -10,7 +10,7 @@
 // request. The server replays the prior conversation and resumes its loop.
 
 import type {
-  CustomColumnDefinition, RuleDefinition,
+  CustomColumnDefinition, RuleDefinition, ValueDefinition,
 } from '../core/types';
 import type { LlmIndex } from '../core/llm-index';
 
@@ -26,18 +26,27 @@ export interface ParsedColumnPayload {
   format: { type: 'number' | 'percentage' | 'currency'; decimals: number };
 }
 
+export interface ParsedValuePayload {
+  name: string;
+  displayLabel?: string;
+  description?: string;
+  expression: string;
+  format: { type: 'number' | 'percentage' | 'currency'; decimals: number };
+}
+
 export interface AmbiguousOption {
   label: string;
-  intent: 'rule' | 'column';
+  intent: 'rule' | 'column' | 'value';
   description: string;
 }
 
 export interface AIParseResult {
-  intent: 'rule' | 'column' | 'ambiguous';
+  intent: 'rule' | 'column' | 'value' | 'ambiguous';
   humanReadable: string;
   confidence: number;
   rule?: ParsedRulePayload;
   column?: ParsedColumnPayload;
+  value?: ParsedValuePayload;
   options?: AmbiguousOption[];
 }
 
@@ -110,5 +119,16 @@ export function columnFromAi(raw: ParsedColumnPayload): CustomColumnDefinition {
     expression: raw.expression,
     format: raw.format,
     side: 'general',
+  };
+}
+
+export function valueFromAi(raw: ParsedValuePayload): ValueDefinition {
+  return {
+    id: `ai_val_${Date.now().toString(36)}`,
+    name: raw.name,
+    displayLabel: raw.displayLabel,
+    description: raw.description,
+    expression: raw.expression,
+    format: raw.format,
   };
 }

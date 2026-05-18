@@ -23,7 +23,7 @@ import { FUNCTION_CATALOG, type FunctionSpec } from '@tradl/shared';
 import { PARSE_SYSTEM_PROMPT } from './prompts/parse.js';
 import { PARSE_TOOLS } from './prompts/tools.js';
 import {
-  validateBooleanExpression, validateNumericExpression,
+  validateBooleanExpression, validateNumericExpression, validateValueExpression,
   type ColumnLike, type ValidationResult,
 } from './ai-validator.js';
 import { getAtmRow } from './snapshot-store.js';
@@ -73,18 +73,26 @@ interface ParsedColumn {
   expression: string;
   format: { type: 'number' | 'percentage' | 'currency'; decimals: number };
 }
+interface ParsedValue {
+  name: string;
+  displayLabel?: string;
+  description?: string;
+  expression: string;
+  format: { type: 'number' | 'percentage' | 'currency'; decimals: number };
+}
 interface AmbiguousOption {
   label: string;
-  intent: 'rule' | 'column';
+  intent: 'rule' | 'column' | 'value';
   description: string;
 }
 
 export interface ParseResult {
-  intent: 'rule' | 'column' | 'ambiguous';
+  intent: 'rule' | 'column' | 'value' | 'ambiguous';
   humanReadable: string;
   confidence: number;
   rule?: ParsedRule;
   column?: ParsedColumn;
+  value?: ParsedValue;
   options?: AmbiguousOption[];
 }
 
@@ -101,11 +109,12 @@ export class AIValidationError extends Error {
 interface GetFunctionDetailsInput { names: string[] }
 interface AskUserToClarifyInput   { question: string }
 interface SubmitExpressionInput   {
-  intent: 'rule' | 'column' | 'ambiguous';
+  intent: 'rule' | 'column' | 'value' | 'ambiguous';
   humanReadable: string;
   confidence: number;
   rule?: ParsedRule;
   column?: ParsedColumn;
+  value?: ParsedValue;
   options?: AmbiguousOption[];
 }
 
@@ -190,6 +199,10 @@ function validateSubmission(
     if (!input.column) return { ok: false, error: 'column payload missing', detail: 'intent="column" but column is undefined' };
     return validateNumericExpression(input.column.expression, sample, columns);
   }
+  if (input.intent === 'value') {
+    if (!input.value) return { ok: false, error: 'value payload missing', detail: 'intent="value" but value is undefined' };
+    return validateValueExpression(input.value.expression, sample, columns);
+  }
   // ambiguous — must carry options
   if (!input.options?.length) {
     return { ok: false, error: 'options missing', detail: 'intent="ambiguous" but options is empty. Provide 2–3 options or pick a concrete intent.' };
@@ -215,6 +228,15 @@ function normalizeSubmission(input: SubmitExpressionInput): ParseResult {
       format: {
         type: input.column.format.type,
         decimals: Math.max(0, Math.min(6, Math.round(input.column.format.decimals))),
+      },
+    };
+  }
+  if (input.value) {
+    out.value = {
+      ...input.value,
+      format: {
+        type: input.value.format.type,
+        decimals: Math.max(0, Math.min(6, Math.round(input.value.format.decimals))),
       },
     };
   }
